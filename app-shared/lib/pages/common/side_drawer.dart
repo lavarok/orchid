@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:orchid/api/orchid_api.dart';
 import 'package:orchid/api/orchid_budget_api.dart';
 import 'package:orchid/pages/app_colors.dart';
+import 'package:orchid/pages/common/tap_copy_text.dart';
 import 'package:orchid/util/units.dart';
 import '../app_routes.dart';
 import '../app_text.dart';
@@ -49,29 +50,17 @@ class _SideDrawerState extends State<SideDrawer> {
     return Column(
       children: <Widget>[
         // top logo
-        DrawerHeader(
-          child: Image(image: AssetImage('assets/images/logo.png')),
+        Theme(
+          data: ThemeData(dividerColor: Colors.transparent),
+          child: DrawerHeader(
+            child: Image(image: AssetImage('assets/images/logo.png')),
+          ),
         ),
 
         Expanded(
           child: ListView(
             padding: EdgeInsets.zero,
             children: <Widget>[
-              Visibility(
-                visible: OrchidBudgetAPI.featureEnabled,
-                child: Column(
-                  children: <Widget>[
-                    BalanceSideDrawerTile(
-                        title: "Balance",
-                        imageName: 'assets/images/wallet.png',
-                        onPressed: () {
-                          //Navigator.pushNamed(context, '/budget/balance');
-                        }),
-                    divider(),
-                  ],
-                ),
-              ),
-              divider(),
               SideDrawerTile(
                   title: "Help",
                   //imageName: 'assets/images/help.png',
@@ -100,6 +89,15 @@ class _SideDrawerState extends State<SideDrawer> {
                   }),
               divider(),
               SideDrawerTile(
+                  title: "Settings",
+                  imageName: 'assets/images/settings.png',
+                  showDetail: true,
+                  hoffset: 4.0,
+                  onPressed: () {
+                    Navigator.pushNamed(context, AppRoutes.settings);
+                  }),
+              divider(),
+              SideDrawerTile(
                   title: "Advanced",
                   imageName: 'assets/images/settings.png',
                   showDetail: true,
@@ -117,7 +115,8 @@ class _SideDrawerState extends State<SideDrawer> {
             children: <Widget>[
               divider(),
               SizedBox(height: 16),
-              Text("Version: " + (_version ?? ""),
+              TapToCopyText("Version: " + (_version ?? "<no version>"),
+                  key: ValueKey(_version),
                   style:
                       AppText.noteStyle.copyWith(color: AppColors.neutral_4)),
             ],
@@ -203,15 +202,6 @@ class _BalanceSideDrawerTileState extends State<BalanceSideDrawerTile> {
   @override
   void initState() {
     super.initState();
-
-    if (OrchidBudgetAPI.featureEnabled) {
-      // Listen to the funding balance.
-      _balanceListener = OrchidAPI().budget().potStatus.listen((pot) {
-        setState(() {
-          this._balance = pot.balance;
-        });
-      });
-    }
   }
 
   @override

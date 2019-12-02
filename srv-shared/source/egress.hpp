@@ -30,6 +30,8 @@
 
 namespace orc {
 
+class Translator;
+
 class Egress :
     public Valve,
     public Pipe<Buffer>,
@@ -43,7 +45,7 @@ class Egress :
 
     struct Translation_ {
         Socket socket_;
-        BufferDrain *drain_;
+        Translator *translator_;
         LRU_::iterator lru_iter_;
     };
 
@@ -52,27 +54,14 @@ class Egress :
     Translations_ translations_;
     LRU_ lru_;
 
-    Translations_::iterator Find(const Three &target) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        auto translation_iter(translations_.find(target));
-        if (translation_iter != translations_.end()) {
-            lru_.erase(translation_iter->second.lru_iter_);
-            lru_.push_back(translation_iter->first);
-            translation_iter->second.lru_iter_ = std::prev(lru_.end());
-        }
-        return translation_iter;
-    }
+    Translations_::iterator Find(const Three &target);
 
   protected:
     virtual Pump *Inner() = 0;
 
     void Land(const Buffer &data) override;
 
-    void Stop(const std::string &error) override {
-        std::unique_lock<std::mutex> lock(mutex_);
-        for (auto translation : translations_)
-            translation.second.drain_->Stop(error);
-    }
+    void Stop(const std::string &error) override;
 
   public:
     Egress(uint32_t local) :
@@ -93,30 +82,16 @@ class Egress :
         co_await Inner()->Send(data);
     }
 
-    const Socket &Translate(BufferDrain *drain, const Three &three) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        auto ephemeral(ephemeral_base_ + translations_.size());
-        if (ephemeral >= 65535) {
-            auto old_three(*lru_.begin());
-            auto old_translation_iter(translations_.find(old_three));
-            orc_insist(old_translation_iter != translations_.end());
-            ephemeral = old_translation_iter->first.Port();
-            translations_.erase(old_translation_iter);
-        }
-        auto new_three(Three(three.Protocol(), local_, ephemeral));
-        lru_.push_back(new_three);
-        auto lru_iter(std::prev(lru_.end()));
-        auto translation(translations_.emplace(new_three, Translation_{three.Two(), drain, lru_iter}));
-        orc_insist(translation.second);
-        return translation.first->first;
-    }
+    const Socket &Translate(Translator *translator, const Three &three);
 };
 
-class Translator :
+
+class Translator:
     public Link
 {
   private:
     S<Egress> egress_;
+    std::mutex mutex_;
 
     typedef std::map<Three, Socket> Translations_;
     Translations_ translations_;
@@ -135,6 +110,14 @@ class Translator :
     }
 
     task<void> Send(const Buffer &data) override;
+    using Link::Stop;
+    using Link::Land;
+
+    void Remove(const Three &source) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        orc_insist(translations_.find(source) != translations_.end());
+        translations_.erase(source);
+    }
 };
 
 }

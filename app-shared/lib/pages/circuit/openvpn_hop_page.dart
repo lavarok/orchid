@@ -7,11 +7,14 @@ import '../app_colors.dart';
 import '../app_text.dart';
 import 'circuit_hop.dart';
 
-class OpenVPNHopPage extends StatefulWidget implements HopEditor<OpenVPNHop> {
-  @override
-  final EditableHop editableHop;
-
-  OpenVPNHopPage({@required this.editableHop});
+/// Create / edit / view an Open VPN Hop
+class OpenVPNHopPage extends HopEditor<OpenVPNHop> {
+  OpenVPNHopPage(
+      {@required editableHop, mode = HopEditorMode.View, onAddFlowComplete})
+      : super(
+            editableHop: editableHop,
+            mode: mode,
+            onAddFlowComplete: onAddFlowComplete);
 
   @override
   _OpenVPNHopPageState createState() => _OpenVPNHopPageState();
@@ -48,6 +51,9 @@ class _OpenVPNHopPageState extends State<OpenVPNHopPage> {
     return TapClearsFocus(
       child: TitledPage(
         title: "Open VPN Hop",
+        actions: widget.mode == HopEditorMode.Create
+            ? [widget.buildSaveButton(context)]
+            : [],
         child: Padding(
           padding: const EdgeInsets.all(24.0),
           child: SafeArea(
@@ -116,13 +122,13 @@ class _OpenVPNHopPageState extends State<OpenVPNHopPage> {
   }
 
   void _updateHop() {
-    widget.editableHop.value = UniqueHop(
-        key: widget.editableHop.value?.key ??
-            DateTime.now().millisecondsSinceEpoch,
-        hop: OpenVPNHop(
-            userName: _userName.text,
-            userPassword: _userPassword.text,
-            ovpnConfig: _ovpnConfig.text));
+    if (!widget.editable()) {
+      return;
+    }
+    widget.editableHop.update(OpenVPNHop(
+        userName: _userName.text,
+        userPassword: _userPassword.text,
+        ovpnConfig: _ovpnConfig.text));
   }
 
   @override

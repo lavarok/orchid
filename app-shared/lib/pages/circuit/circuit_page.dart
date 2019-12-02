@@ -10,6 +10,7 @@ import 'package:orchid/util/collections.dart';
 
 import '../app_gradients.dart';
 import '../app_text.dart';
+import 'add_hop_page.dart';
 import 'circuit_hop.dart';
 
 class CircuitPage extends StatefulWidget {
@@ -21,7 +22,6 @@ class CircuitPage extends StatefulWidget {
 
 class CircuitPageState extends State<CircuitPage> {
   List<UniqueHop> _hops;
-  bool _keysAvailable = false;
 
   @override
   void initState() {
@@ -31,7 +31,6 @@ class CircuitPageState extends State<CircuitPage> {
 
   void initStateAsync() async {
     var circuit = await UserPreferences().getCircuit();
-    var keys = await UserPreferences().getKeys();
     if (mounted) {
       setState(() {
         // Wrap the hops with a locally unique id for the UI
@@ -40,7 +39,6 @@ class CircuitPageState extends State<CircuitPage> {
           return UniqueHop(key: key, hop: hop);
         }))
             .toList();
-        _keysAvailable = keys != null && keys.length > 0;
       });
     }
   }
@@ -54,13 +52,7 @@ class CircuitPageState extends State<CircuitPage> {
           children: <Widget>[
             pady(16),
             Expanded(child: _buildListView()),
-            Visibility(
-              visible: _keysAvailable,
-              child: FloatingAddButton(onPressed: _addHop),
-              replacement: Text("Add keys before creating a circuit...",
-                  style: AppText.textHintStyle
-                      .copyWith(fontStyle: FontStyle.italic, fontSize: 14)),
-            ),
+            FloatingAddButton(onPressed: _addHop),
           ],
         ),
       ),
@@ -88,7 +80,7 @@ class CircuitPageState extends State<CircuitPage> {
             },
             child: ListTile(
               onTap: () {
-                _editHop(uniqueHop);
+                _viewHop(uniqueHop);
               },
               key: Key(uniqueHop.key.toString()),
               title: Text(
@@ -103,80 +95,66 @@ class CircuitPageState extends State<CircuitPage> {
         onReorder: _onReorder);
   }
 
+  // Show the add hop flow and save the result if completed successfully.
   void _addHop() async {
-    _showAddHopChoices(
-      context: context,
-      child: CupertinoActionSheet(
-          title: Text('Hop Type', style: TextStyle(fontSize: 21)),
-          actions: <Widget>[
-            CupertinoActionSheetAction(
-              child: const Text("Orchid"),
-              onPressed: () {
-                Navigator.pop(context, Protocol.Orchid);
-              },
-            ),
-            CupertinoActionSheetAction(
-              child: const Text("Open VPN"),
-              onPressed: () {
-                Navigator.pop(context, Protocol.OpenVPN);
-              },
-            ),
-          ],
-          cancelButton: CupertinoActionSheetAction(
-            child: const Text('Cancel'),
-            onPressed: () {
-              Navigator.pop(context);
-            },
-          )),
+    // Create a nested navigation context for the flow.
+    // Performing a pop() from this outer context at any point will properly
+    // remove the entire flow with the correct animation.
+    var addFlow = Navigator(
+      onGenerateRoute: (RouteSettings settings) {
+        print("generate route: $settings");
+        var addFlowCompletion = (CircuitHop result) {
+          Navigator.pop(context, result);
+        };
+        var editor = AddHopPage(onAddFlowComplete: addFlowCompletion);
+        var route = MaterialPageRoute<CircuitHop>(
+            builder: (context) => editor, settings: settings);
+        return route;
+      },
     );
-  }
+    var route = MaterialPageRoute<CircuitHop>(
+        builder: (context) => addFlow, fullscreenDialog: true);
 
-  void _showAddHopChoices({BuildContext context, Widget child}) {
-    showCupertinoModalPopup<Protocol>(
-      context: context,
-      builder: (BuildContext context) => child,
-    ).then<void>((value) {
-      if (value != null) {
-        _addHopType(value);
-      }
-    });
-  }
+    var hop = await Navigator.push(context, route);
+    print("hop = $hop");
 
-  void _addHopType(Protocol hopType) async {
-    EditableHop editableHop = EditableHop.empty();
-    HopEditor editor;
-    switch (hopType) {
-      case Protocol.Orchid:
-        editor = OrchidHopPage(editableHop: editableHop);
-        break;
-      case Protocol.OpenVPN:
-        editor = OpenVPNHopPage(editableHop: editableHop);
-        break;
+    if (hop == null) {
+      return; // user cancelled
     }
-
-    await _showEditor(editor);
-    if (_hops == null) {
-      _hops = [];
-    }
+    var uniqueHop =
+        UniqueHop(hop: hop, key: DateTime.now().millisecondsSinceEpoch);
     setState(() {
-      _hops.add(editableHop.value);
+      _hops.add(uniqueHop);
     });
     _saveCircuit();
+
+    // View the newly created hop:
+    // Note: ideally we would like this to act like the iOS Contacts add flow,
+    // Note: revealing the already pushed navigation state upon completing the
+    // Note: add flow.  Doing a non-animated push approximates this.
+    _viewHop(uniqueHop, animated: false);
   }
 
-  void _editHop(UniqueHop uniqueHop) async {
+  // View a hop selected from the circuit list
+  void _viewHop(UniqueHop uniqueHop, {bool animated = true}) async {
     EditableHop editableHop = EditableHop(uniqueHop);
     var editor;
     switch (uniqueHop.hop.protocol) {
       case Protocol.Orchid:
-        editor = OrchidHopPage(editableHop: editableHop);
+        editor =
+            OrchidHopPage(editableHop: editableHop, mode: HopEditorMode.View);
         break;
       case Protocol.OpenVPN:
-        editor = OpenVPNHopPage(editableHop: editableHop);
+        editor = OpenVPNHopPage(
+          editableHop: editableHop,
+          mode: HopEditorMode.Edit,
+        );
         break;
     }
+    await _showEditor(editor, animated: animated);
 
-    await _showEditor(editor);
+    // TODO: avoid saving if the hop was not edited.
+    // Save the hop if it was edited.
     var index = _hops.indexOf(uniqueHop);
     setState(() {
       _hops.removeAt(index);
@@ -185,9 +163,11 @@ class CircuitPageState extends State<CircuitPage> {
     _saveCircuit();
   }
 
-  Future<UniqueHop> _showEditor(editor) async {
-    var route = MaterialPageRoute<UniqueHop>(builder: (context) => editor);
-    return await Navigator.push(context, route);
+  Future<void> _showEditor(editor, {bool animated = true}) async {
+    var route = animated
+        ? MaterialPageRoute(builder: (context) => editor)
+        : NoAnimationMaterialPageRoute(builder: (context) => editor);
+    await Navigator.push(context, route);
   }
 
   // Callback for swipe to delete
@@ -199,7 +179,7 @@ class CircuitPageState extends State<CircuitPage> {
     _saveCircuit();
   }
 
-  void _saveCircuit() {
+  void _saveCircuit() async {
     var circuit = Circuit(_hops.map((uniqueHop) => uniqueHop.hop).toList());
     UserPreferences().setCircuit(circuit);
     OrchidAPI().updateConfiguration();
@@ -215,5 +195,40 @@ class CircuitPageState extends State<CircuitPage> {
       _hops.insert(newIndex, hop);
     });
     _saveCircuit();
+  }
+}
+
+// https://stackoverflow.com/a/53503738/74975
+class NoAnimationMaterialPageRoute<T> extends MaterialPageRoute<T> {
+  NoAnimationMaterialPageRoute({
+    @required WidgetBuilder builder,
+    RouteSettings settings,
+    bool maintainState = true,
+    bool fullscreenDialog = false,
+  }) : super(
+            builder: builder,
+            maintainState: maintainState,
+            settings: settings,
+            fullscreenDialog: fullscreenDialog);
+
+  @override
+  Widget buildTransitions(BuildContext context, Animation<double> animation,
+      Animation<double> secondaryAnimation, Widget child) {
+    /*
+    // Experimenting with making this one-way.
+    if (animation.status == AnimationStatus.reverse) {
+      var begin = Offset.zero;
+      var end = Offset(0.0, 1.0);
+      var tween = Tween(begin: begin, end: end);
+      var offsetAnimation = animation.drive(tween);
+      return SlideTransition(
+          position: offsetAnimation,
+          child: child
+      );
+    } else {
+      return child;
+    }
+     */
+    return child;
   }
 }

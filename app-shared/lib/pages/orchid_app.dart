@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:orchid/pages/app_routes.dart';
 import 'package:orchid/pages/common/side_drawer.dart';
 import 'package:orchid/pages/connect/connect_page.dart';
-import 'package:orchid/pages/monitoring/monitoring_page.dart';
-import 'package:orchid/pages/keys/keys_page.dart';
 import 'circuit/circuit_page.dart';
 import 'monitoring/traffic_view.dart';
 
@@ -24,7 +22,7 @@ class _OrchidAppState extends State<OrchidApp> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _tabController = new TabController(length: 4, vsync: this);
+    _tabController = new TabController(length: 3, vsync: this);
     _tabController.addListener(_handleTabSelection);
   }
 
@@ -42,15 +40,16 @@ class _OrchidAppState extends State<OrchidApp> with TickerProviderStateMixin {
           ),
           body: TabBarView(
             controller: _tabController,
+
             children: [
               QuickConnectPage(),
               TrafficView(clearTrafficController: _trafficButtonController),
               CircuitPage(),
-              KeysPage()
             ],
           ),
           bottomNavigationBar: SafeArea(
             child: new TabBar(
+              indicatorColor: Colors.transparent,
               controller: _tabController,
               tabs: [
                 Tab(
@@ -76,15 +75,7 @@ class _OrchidAppState extends State<OrchidApp> with TickerProviderStateMixin {
                           ? Colors.white
                           : Colors.white60,
                       height: 27),
-                ),
-                Tab(
-                  text: "Keys",
-                  icon: Image.asset("assets/images/balanceOpt.png",
-                      color: _tabController.index == 3
-                          ? Colors.white
-                          : Colors.white60,
-                      height: 27),
-                ),
+                )
               ],
             ),
           ),
@@ -95,7 +86,7 @@ class _OrchidAppState extends State<OrchidApp> with TickerProviderStateMixin {
   }
 
   void _handleTabSelection() {
-    var titles = [_logo, Text("Traffic"), Text("Circuit"), Text("Keys")];
+    var titles = [_logo, Text("Traffic"), Text("Circuit")];
     setState(() {
       _pageTitle = titles[_tabController.index];
       _pageActions = _tabController.index == 1

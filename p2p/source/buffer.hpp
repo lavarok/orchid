@@ -50,6 +50,16 @@ class Buffer {
     virtual bool each(const std::function<bool (const uint8_t *, size_t)> &code) const = 0;
 
     virtual size_t size() const;
+    virtual bool have(size_t value) const;
+
+    virtual bool zero() const {
+        return each([&](const uint8_t *data, size_t size) {
+            for (decltype(size) i(0); i != size; ++i)
+                if (data[i] != 0)
+                    return false;
+            return true;
+        });
+    }
 
     virtual bool empty() const {
         return size() == 0;
@@ -94,6 +104,10 @@ class Region :
   public:
     virtual const uint8_t *data() const = 0;
     size_t size() const override = 0;
+
+    bool have(size_t value) const override {
+        return value <= size();
+    }
 
     bool each(const std::function<bool (const uint8_t *, size_t)> &code) const override {
         return code(data(), size());
@@ -448,6 +462,13 @@ inline bool operator ==(const Brick<Size_> &lhs, const Brick<Size_> &rhs) {
     return memcmp(lhs.data(), rhs.data(), Size_) == 0;
 }
 
+template <size_t Size_>
+Brick<Size_> Zero() {
+    Brick<Size_> brick;
+    memset(brick.data(), 0, brick.size());
+    return brick;
+}
+
 template <typename Type_, bool Arithmetic_ = std::is_arithmetic<Type_>::value>
 class Number;
 
@@ -490,6 +511,10 @@ class Number<Type_, true> final :
     size_t size() const override {
         return sizeof(Type_);
     }
+
+    bool zero() const override {
+        return value_ != 0;
+    }
 };
 
 template <unsigned Bits_, boost::multiprecision::cpp_integer_type Sign_, boost::multiprecision::cpp_int_check_type Check_>
@@ -497,6 +522,7 @@ class Number<boost::multiprecision::number<boost::multiprecision::backends::cpp_
     public Data<(Bits_ >> 3)>
 {
   public:
+    // NOLINTNEXTLINE (modernize-use-equals-default)
     using Data<(Bits_ >> 3)>::Data;
 
     Number(boost::multiprecision::number<boost::multiprecision::backends::cpp_int_backend<Bits_, Bits_, Sign_, Check_, void>> value, uint8_t pad = 0) {
@@ -656,6 +682,28 @@ class Nothing final :
     }
 };
 
+inline bool Each(const Buffer &buffer, const std::function<bool (const uint8_t *, size_t)> &code) {
+    return buffer.each(code);
+}
+
+template <typename Type_>
+inline typename std::enable_if<std::is_arithmetic<Type_>::value, bool>::type Each(const Type_ &value, const std::function<bool (const uint8_t *, size_t)> &code) {
+    return Number<Type_>(value).each(code);
+}
+
+template <unsigned Bits_, boost::multiprecision::cpp_integer_type Sign_, boost::multiprecision::cpp_int_check_type Check_>
+inline typename std::enable_if<Bits_ % 8 == 0, bool>::type Each(const boost::multiprecision::number<boost::multiprecision::backends::cpp_int_backend<Bits_, Bits_, Sign_, Check_, void>> &value, const std::function<bool (const uint8_t *, size_t)> &code) {
+    return Number<boost::multiprecision::number<boost::multiprecision::backends::cpp_int_backend<Bits_, Bits_, Sign_, Check_, void>>>(value).each(code);
+}
+
+template <typename... Args_>
+static bool Each(const std::tuple<Args_...> &tuple, const std::function<bool (const uint8_t *, size_t)> &code) {
+    bool each(true);
+    boost::mp11::tuple_for_each(tuple, [&](const auto &value) {
+        each &= Each(value, code);
+    }); return each;
+}
+
 template <typename... Buffer_>
 class Knot final :
     public Buffer
@@ -670,11 +718,7 @@ class Knot final :
     }
 
     bool each(const std::function<bool (const uint8_t *, size_t)> &code) const override {
-        bool value(true);
-        boost::mp11::tuple_for_each(buffers_, [&](const auto &buffer) {
-            value &= buffer.each(code);
-        });
-        return value;
+        return Each(buffers_, code);
     }
 };
 
@@ -828,13 +872,12 @@ class Window :
         orc_assert(empty());
     }
 
-    void Take(uint8_t *data, size_t size) {
+    template <typename Code_>
+    void Take(Code_ &&code, size_t need) {
         auto &here(range_);
         auto &step(offset_);
 
-        auto rest(ranges_.get() + count_ - here);
-
-        for (auto need(size); need != 0; step = 0, ++here, --rest) {
+        for (auto rest(ranges_.get() + count_ - here); need != 0; step = 0, ++here, --rest) {
             orc_assert(rest != 0);
 
             auto size(here->size() - step);
@@ -842,15 +885,21 @@ class Window :
                 continue;
 
             if (need < size) {
-                memcpy(data, here->data() + step, need);
+                code(here->data() + step, need);
                 step += need;
                 break;
             }
 
-            memcpy(data, here->data() + step, size);
-            data += size;
+            code(here->data() + step, size);
             need -= size;
         }
+    }
+
+    void Take(uint8_t *here, size_t size) {
+        Take([&](const uint8_t *data, size_t size) {
+            memcpy(here, data, size);
+            here += size;
+        }, size);
     }
 
     void Take(std::string &data) {
@@ -874,6 +923,7 @@ class Window :
     }
 
     Beam Take(size_t size) {
+        orc_assert(have(size));
         Beam beam(size);
         Take(beam.data(), beam.size());
         return beam;
@@ -885,21 +935,16 @@ class Window :
         Take(reinterpret_cast<uint8_t *>(value), sizeof(Type_));
     }
 
-    // XXX: this is not efficient
     void Skip(size_t size) {
-        (void) Take(size);
+        Take([&](const uint8_t *data, size_t size) {
+        }, size);
     }
 
-    // XXX: this is not efficient
     void Zero(size_t size) {
-        auto data(Take(size));
-        for (size_t i(0); i != size; ++i)
-            orc_assert(data[i] == 0);
-    }
-
-    template <size_t Size_>
-    void Take(Pad<Size_> &value) {
-        Zero(Size_);
+        Take([&](const uint8_t *data, size_t size) {
+            for (decltype(size) i(0); i != size; ++i)
+                orc_assert(data[i] == 0);
+        }, size);
     }
 };
 
@@ -947,6 +992,29 @@ class Builder :
     }
 };
 
+template <typename... Args_>
+struct Building;
+
+template <>
+struct Building<> {
+static void Build(Builder &builder) {
+} };
+
+template <typename Next_, typename... Rest_>
+struct Building<Next_, Rest_...> {
+static void Build(Builder &builder, Next_ &&next, Rest_ &&...rest) {
+    Each(std::forward<Next_>(next), [&](const uint8_t *data, size_t size) {
+        builder += Beam(data, size);
+        return true;
+    });
+    Building<Rest_...>::Build(builder, std::forward<Rest_>(rest)...);
+} };
+
+template <typename... Args_>
+void Build(Builder &builder, Args_ &&...args) {
+    Building<Args_...>::Build(builder, std::forward<Args_>(args)...);
+}
+
 
 template <size_t Index_, typename Next_, typename Enable_, typename... Taking_>
 struct Taking;
@@ -957,7 +1025,7 @@ struct Taker;
 template <size_t Index_, size_t Size_, typename... Taking_>
 struct Taking<Index_, Pad<Size_>, void, Taking_...> final {
 template <typename Tuple_, typename Buffer_>
-static void Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
+static bool Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
     window.Zero(Size_);
     return Taker<Index_, Taking_...>::Take(tuple, window, std::forward<Buffer_>(buffer));
 } };
@@ -965,7 +1033,7 @@ static void Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
 template <size_t Index_, size_t Size_, typename... Taking_>
 struct Taking<Index_, Brick<Size_>, void, Taking_...> final {
 template <typename Tuple_, typename Buffer_>
-static void Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
+static bool Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
     window.Take(std::get<Index_>(tuple));
     return Taker<Index_ + 1, Taking_...>::Take(tuple, window, std::forward<Buffer_>(buffer));
 } };
@@ -973,7 +1041,7 @@ static void Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
 template <size_t Index_, typename Type_, typename... Taking_>
 struct Taking<Index_, Number<Type_>, void, Taking_...> final {
 template <typename Tuple_, typename Buffer_>
-static void Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
+static bool Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
     window.Take(std::get<Index_>(tuple));
     return Taker<Index_ + 1, Taking_...>::Take(tuple, window, std::forward<Buffer_>(buffer));
 } };
@@ -981,7 +1049,7 @@ static void Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
 template <size_t Index_, unsigned Bits_, boost::multiprecision::cpp_integer_type Sign_, boost::multiprecision::cpp_int_check_type Check_, typename... Taking_>
 struct Taking<Index_, boost::multiprecision::number<boost::multiprecision::backends::cpp_int_backend<Bits_, Bits_, Sign_, Check_, void>>, typename std::enable_if<Bits_ % 8 == 0>::type, Taking_...> final {
 template <typename Tuple_, typename Buffer_>
-static void Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
+static bool Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
     Brick<Bits_ / 8> brick;
     window.Take(brick);
     std::get<Index_>(tuple) = brick.template num<boost::multiprecision::number<boost::multiprecision::backends::cpp_int_backend<Bits_, Bits_, Sign_, Check_, void>>>();
@@ -991,7 +1059,7 @@ static void Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
 template <size_t Index_, typename Next_, typename... Taking_>
 struct Taking<Index_, Next_, typename std::enable_if<std::is_arithmetic<Next_>::value>::type, Taking_...> {
 template <typename Tuple_, typename Buffer_>
-static void Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
+static bool Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
     Brick<sizeof(Next_)> brick;
     window.Take(brick);
     std::get<Index_>(tuple) = brick.template num<Next_>();
@@ -1001,37 +1069,40 @@ static void Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
 template <size_t Index_>
 struct Taking<Index_, Window, void> {
 template <typename Tuple_, typename Buffer_>
-static void Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
+static bool Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
     static_assert(!std::is_rvalue_reference<Buffer_ &&>::value);
     std::get<Index_>(tuple) = std::move(window);
+    return false;
 } };
 
 template <size_t Index_>
 struct Taking<Index_, Rest, void> {
 template <typename Tuple_>
-static void Take(Tuple_ &tuple, Window &window, Beam &&buffer) {
+static bool Take(Tuple_ &tuple, Window &window, Beam &&buffer) {
     std::get<Index_>(tuple) = Rest(std::move(window), std::move(buffer));
+    return false;
 } };
 
 template <size_t Index_>
 struct Taking<Index_, Beam, void> {
 template <typename Tuple_>
-static void Take(Tuple_ &tuple, Window &window, Beam &&buffer) {
+static bool Take(Tuple_ &tuple, Window &window, Beam &&buffer) {
     std::get<Index_>(tuple) = Beam(window);
+    return false;
 } };
 
 template <size_t Index_, typename Next_, typename... Taking_>
 struct Taker<Index_, Next_, Taking_...> {
 template <typename Tuple_, typename Buffer_>
-static void Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
+static bool Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
     return Taking<Index_, Next_, void, Taking_...>::Take(tuple, window, std::forward<Buffer_>(buffer));
 } };
 
 template <size_t Index_>
 struct Taker<Index_> {
 template <typename Tuple_, typename Buffer_>
-static void Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
-    window.Stop();
+static bool Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
+    return true;
 } };
 
 template <typename Tuple_, typename... Taking_>
@@ -1052,11 +1123,21 @@ struct Taken<Tuple_> {
     typedef Tuple_ type;
 };
 
+template <size_t Index_, typename... Nested_, typename... Taking_>
+struct Taking<Index_, std::tuple<Nested_...>, void, Taking_...> {
+template <typename Tuple_, typename Buffer_>
+static bool Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
+    auto stop(Taker<0, Nested_...>::Take(std::get<Index_>(tuple), window, std::forward<Buffer_>(buffer)));
+    orc_assert(stop);
+    return Taker<Index_ + 1, Taking_...>::Take(tuple, window, std::forward<Buffer_>(buffer));
+} };
+
 template <typename... Taking_, typename Buffer_>
 auto Take(Buffer_ &&buffer) {
     typename Taken<std::tuple<>, Taking_...>::type tuple;
     Window window(buffer);
-    Taker<0, Taking_...>::Take(tuple, window, std::forward<Buffer_>(buffer));
+    if (Taker<0, Taking_...>::Take(tuple, window, std::forward<Buffer_>(buffer)))
+        window.Stop();
     return tuple;
 }
 

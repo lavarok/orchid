@@ -3,12 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:orchid/api/orchid_crypto.dart';
 import 'package:orchid/api/user_preferences.dart';
-import 'package:orchid/pages/app_gradients.dart';
 import 'package:orchid/pages/common/formatting.dart';
+import 'package:orchid/pages/common/titled_page_base.dart';
 
 import '../app_colors.dart';
 import '../app_text.dart';
-import 'import_key_page.dart';
+import 'add_key_page.dart';
 
 class KeysPage extends StatefulWidget {
   @override
@@ -35,8 +35,8 @@ class _KeysPageState extends State<KeysPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(gradient: AppGradients.basicGradient),
+    return TitledPage(
+      title: "Keys",
       child: SafeArea(
         child: Column(
           children: <Widget>[
@@ -85,57 +85,12 @@ class _KeysPageState extends State<KeysPage> {
   }
 
   void _addKey() async {
-    _showAddKeyChoices(
-      context: context,
-      child: CupertinoActionSheet(
-          title: Text('Key Source', style: TextStyle(fontSize: 21)),
-          actions: <Widget>[
-            CupertinoActionSheetAction(
-              child: const Text("Generate"),
-              onPressed: () {
-                Navigator.pop(context, KeySource.Generate);
-              },
-            ),
-            CupertinoActionSheetAction(
-              child: const Text("Import"),
-              onPressed: () {
-                Navigator.pop(context, KeySource.Import);
-              },
-            ),
-          ],
-          cancelButton: CupertinoActionSheetAction(
-            child: const Text('Cancel'),
-            onPressed: () {
-              Navigator.pop(context);
-            },
-          )),
-    );
-  }
-
-  void _showAddKeyChoices({BuildContext context, Widget child}) {
-    showCupertinoModalPopup<KeySource>(
-      context: context,
-      builder: (BuildContext context) => child,
-    ).then<void>((source) {
-      if (source != null) {
-        _addKeyFromSource(source);
-      }
-    });
-  }
-
-  void _addKeyFromSource(KeySource source) async {
-    StoredEthereumKey newKey;
-    switch (source) {
-      case KeySource.Generate:
-        newKey = _generateKey();
-        break;
-      case KeySource.Import:
-        newKey = await _importKey();
-        break;
-    }
+    var route = MaterialPageRoute<StoredEthereumKey>(
+        builder: (context) => AddKeyPage(), fullscreenDialog: true);
+    StoredEthereumKey key = await Navigator.push(context, route);
 
     // User cancelled
-    if (newKey == null) {
+    if (key == null) {
       return;
     }
 
@@ -144,7 +99,7 @@ class _KeysPageState extends State<KeysPage> {
       _keys = [];
     }
     setState(() {
-      _keys.add(newKey);
+      _keys.add(key);
       _sortKeys();
     });
 
@@ -159,22 +114,6 @@ class _KeysPageState extends State<KeysPage> {
     _keys.sort((a, b) {
       return -a.time.compareTo(b.time);
     });
-  }
-
-  StoredEthereumKey _generateKey() {
-    var keyPair = Crypto.generateKeyPair();
-    return StoredEthereumKey(
-        time: DateTime.now(), imported: false, private: keyPair.private);
-  }
-
-  Future<StoredEthereumKey> _importKey() async {
-    var route = MaterialPageRoute<BigInt>(
-        builder: (context) => ImportKeyPage(), fullscreenDialog: true);
-    var secret = await Navigator.push<BigInt>(context, route);
-    return secret != null
-        ? StoredEthereumKey(
-            time: DateTime.now(), imported: true, private: secret)
-        : null;
   }
 
   _saveKeys() {
