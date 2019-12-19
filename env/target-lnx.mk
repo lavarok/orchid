@@ -27,7 +27,7 @@ meson/aarch64 := aarch64
 
 include $(pwd)/target-gnu.mk
 
-lflags += -Wl,--icf=all
+lflags += -Wl
 lflags += -pthread
 qflags += -fPIC
 
