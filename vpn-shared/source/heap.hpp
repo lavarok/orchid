@@ -49,9 +49,18 @@ class Heap {
     Type_ pop();
 
     template <typename Type_>
+    Type_ pop(const Type_ &other);
+
+    template <typename Type_>
     Type_ eval(const std::string &code) {
         duk_eval_string(duk_, code.c_str());
         return pop<Type_>();
+    }
+
+    template <typename Type_>
+    Type_ eval(const std::string &code, const Type_ &other) {
+        duk_eval_string(duk_, code.c_str());
+        return pop<Type_>(other);
     }
 };
 
@@ -61,15 +70,43 @@ inline void Heap::pop<void>() {
 }
 
 template <>
+inline duk_bool_t Heap::pop<duk_bool_t>() {
+    const auto value(duk_get_boolean(duk_, -1));
+    duk_pop(duk_);
+    return value;
+}
+
+template <>
 inline duk_double_t Heap::pop<duk_double_t>() {
-    auto value(duk_get_number(duk_, -1));
+    const auto value(duk_get_number(duk_, -1));
     duk_pop(duk_);
     return value;
 }
 
 template <>
 inline std::string Heap::pop<std::string>() {
-    std::string value(duk_get_string(duk_, -1));
+    const std::string value(duk_get_string(duk_, -1));
+    duk_pop(duk_);
+    return value;
+}
+
+template <>
+inline duk_bool_t Heap::pop<duk_bool_t>(const duk_bool_t &other) {
+    const auto value(duk_get_boolean_default(duk_, -1, other));
+    duk_pop(duk_);
+    return value;
+}
+
+template <>
+inline duk_double_t Heap::pop<duk_double_t>(const duk_double_t &other) {
+    const auto value(duk_get_number_default(duk_, -1, other));
+    duk_pop(duk_);
+    return value;
+}
+
+template <>
+inline std::string Heap::pop<std::string>(const std::string &other) {
+    const std::string value(duk_get_string_default(duk_, -1, other.c_str()));
     duk_pop(duk_);
     return value;
 }

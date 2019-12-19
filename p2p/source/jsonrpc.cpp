@@ -22,6 +22,8 @@
 
 #include <chrono>
 
+#include <eEVM/util.h>
+
 #include "crypto.hpp"
 #include "error.hpp"
 #include "jsonrpc.hpp"
@@ -93,7 +95,7 @@ std::ostream &operator <<(std::ostream &out, const Nested &value) {
 }
 
 Explode::Explode(Window &window) {
-    auto first(window.Take());
+    const auto first(window.Take());
 
     if (first < 0x80) {
         scalar_ = true;
@@ -105,26 +107,26 @@ Explode::Explode(Window &window) {
     } else if (first < 0xc0) {
         scalar_ = true;
         uint32_t length(0);
-        auto size(first - 0xb7);
+        const auto size(first - 0xb7);
         orc_assert(size <= sizeof(length));
         window.Take(sizeof(length) - size + reinterpret_cast<uint8_t *>(&length), size);
         value_.resize(boost::endian::big_to_native(length));
         window.Take(value_);
     } else if (first < 0xf8) {
         scalar_ = false;
-        auto beam(window.Take(first - 0xc0));
+        const auto beam(window.Take(first - 0xc0));
         Window sub(beam);
-        while (!sub.empty())
+        while (!sub.done())
             array_.emplace_back(Explode(sub));
     } else {
         scalar_ = false;
         uint32_t length(0);
-        auto size(first - 0xf7);
+        const auto size(first - 0xf7);
         orc_assert(size <= sizeof(length));
         window.Take(sizeof(length) - size + reinterpret_cast<uint8_t *>(&length), size);
-        auto beam(window.Take(boost::endian::big_to_native(length)));
+        const auto beam(window.Take(boost::endian::big_to_native(length)));
         Window sub(beam);
-        while (!sub.empty())
+        while (!sub.done())
             array_.emplace_back(Explode(sub));
     }
 }
@@ -132,7 +134,13 @@ Explode::Explode(Window &window) {
 Explode::Explode(Window &&window) :
     Explode(window)
 {
-    orc_assert(window.empty());
+    orc_assert(window.done());
+}
+
+Address::Address(const std::string &address) :
+    uint160_t(address)
+{
+    //orc_assert(eevm::is_checksum_address(address));
 }
 
 Address::Address(const Brick<64> &common) :
@@ -140,11 +148,23 @@ Address::Address(const Brick<64> &common) :
 {
 }
 
+// XXX: implement checksum protocol
+std::ostream &operator <<(std::ostream &out, const Address &address) {
+    return out << "0x" << address.str(0, std::ios::hex);
+}
+
 uint256_t Timestamp() {
     using std::chrono::system_clock;
     system_clock::time_point point(system_clock::now());
     system_clock::duration duration(point.time_since_epoch());
     return std::chrono::duration_cast<std::chrono::seconds>(duration).count();
+}
+
+uint256_t Monotonic() {
+    using std::chrono::system_clock;
+    system_clock::time_point point(system_clock::now());
+    system_clock::duration duration(point.time_since_epoch());
+    return std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
 }
 
 }

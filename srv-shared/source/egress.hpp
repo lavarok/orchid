@@ -38,18 +38,19 @@ class Egress :
     public BufferDrain
 {
   private:
-    uint32_t local_;
-    uint16_t ephemeral_base_ = 4096;
+    const uint32_t local_;
+    const uint16_t ephemeral_base_ = 4096;
 
-    typedef std::list<Three> LRU_;
+    typedef std::list<const Three> LRU_;
 
     struct Translation_ {
-        Socket socket_;
-        Translator *translator_;
+        const Socket socket_;
+        Translator &translator_;
         LRU_::iterator lru_iter_;
     };
 
     typedef std::map<Three, Translation_> Translations_;
+
     std::mutex mutex_;
     Translations_ translations_;
     LRU_ lru_;
@@ -57,7 +58,7 @@ class Egress :
     Translations_::iterator Find(const Three &target);
 
   protected:
-    virtual Pump *Inner() = 0;
+    virtual Pump<Buffer> *Inner() = 0;
 
     void Land(const Buffer &data) override;
 
@@ -82,12 +83,12 @@ class Egress :
         co_await Inner()->Send(data);
     }
 
-    const Socket &Translate(Translator *translator, const Three &three);
+    const Socket &Translate(Translator &translator, const Three &three);
 };
 
 
 class Translator:
-    public Link
+    public Link<Buffer>
 {
   private:
     S<Egress> egress_;
@@ -97,7 +98,7 @@ class Translator:
     Translations_ translations_;
 
     Translations_::iterator Translate(const Three &source) {
-        auto socket(egress_->Translate(this, source));
+        auto socket(egress_->Translate(*this, source));
         auto translation(translations_.emplace(source, socket));
         return translation.first;
     }

@@ -1,10 +1,7 @@
 package net.orchid.Orchid;
 
 import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 
 import android.app.Application;
 import android.app.Notification;
@@ -44,24 +41,6 @@ public class OrchidVpnService extends VpnService {
         return START_STICKY;
     }
 
-    public static void copyTo(InputStream in, File dst) throws IOException {
-        try {
-            OutputStream out = new FileOutputStream(dst);
-            try {
-                // Transfer bytes from in to out
-                byte[] buf = new byte[4096];
-                int len;
-                while ((len = in.read(buf)) > 0) {
-                    out.write(buf, 0, len);
-                }
-            } finally {
-                out.close();
-            }
-        } finally {
-            in.close();
-        }
-    }
-
     private static Application app() {
         try {
             return (Application) Class.forName("android.app.ActivityThread")
@@ -77,7 +56,7 @@ public class OrchidVpnService extends VpnService {
         Builder builder = new Builder();
         builder.addAddress("10.7.0.3", 32);
         builder.addRoute("0.0.0.0", 0);
-        builder.addDnsServer("1.1.1.1");
+        builder.addDnsServer("1.0.0.1");
         builder.setSession("Orchid");
         Log.i(TAG, "builder:" + builder);
         try {

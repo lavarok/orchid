@@ -54,7 +54,7 @@ class Nest :
             //Log() << "Nest[" << nest_ << "]: " << std::dec << count_ << std::endl;
         }
 
-        Count(Count &&count) :
+        Count(Count &&count) noexcept :
             nest_(count.nest_)
         {
             count.nest_ = nullptr;
@@ -63,7 +63,7 @@ class Nest :
         ~Count() {
             if (nest_ == nullptr)
                 return;
-            auto count(--nest_->count_);
+            const auto count(--nest_->count_);
             if (count == 0)
                 nest_->event_.set();
             //Log() << "Nest[" << nest_ << "]: " << std::dec << count << std::endl;
@@ -75,12 +75,12 @@ class Nest :
     };
 
   public:
-    Nest(unsigned limit) :
+    Nest(unsigned limit = -1) :
         limit_(limit)
     {
     }
 
-    task<void> Shut() {
+    task<void> Shut() override {
         for (;;) {
             co_await event_;
         }
@@ -92,9 +92,11 @@ class Nest :
         Count count(this);
         if (count > limit_)
             return;
-        Spawn([count = std::move(count), code = code()]() mutable -> task<void> {
+        Spawn([count = std::move(count), code = code()]() mutable -> task<void> { try {
             co_await code();
-        });
+        } catch (...) {
+            // XXX: log error
+        } });
     }
 };
 

@@ -12,7 +12,7 @@ class CloudFlare {
 
   // Lottery contract address on main net
   static var lotteryContractAddress =
-      '0x38cf68E1d19a0b2d2Ba73865E4c85aA1A544C1BF';
+      '0xb02396f06CC894834b7934ecF8c8E5Ab5C1d12F1';
 
   // The ABI identifier for the `look` method.
   // Note: The first four bytes of the signature hash (Remix can provide this).
@@ -42,7 +42,7 @@ class CloudFlare {
     var postBody =
         '{"jsonrpc": "2.0", "method": "eth_call", "id": 1, "params": ${params}}';
 
-    print("post body = $postBody");
+    //print("post body = $postBody");
     // do the post
     var response = await http.post(url,
         headers: {"Content-Type": "application/json"}, body: postBody);
@@ -52,7 +52,7 @@ class CloudFlare {
     }
     var body = json.decode(response.body);
 
-    if (body['error'] != null){
+    if (body['error'] != null) {
       throw Exception("Cloudflare fetch error in response: $body");
     }
 
@@ -75,4 +75,3 @@ class CloudFlare {
     return '000000000000000000000000' + address.toString(prefix: false);
   }
 }
-

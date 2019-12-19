@@ -20,24 +20,31 @@
 /* }}} */
 
 
-#include <json/json.h>
-
 #include "coinbase.hpp"
 #include "error.hpp"
 #include "http.hpp"
+#include "json.hpp"
 #include "locator.hpp"
+#include "trace.hpp"
 
 namespace orc {
 
-task<cpp_dec_float_50> Price(const std::string &from, const std::string &to) {
-    auto body(co_await Request("GET", {"https", "api.coinbase.com", "443", "/v2/prices/" + from + "-" + to + "/spot"}, {}, {}));
-
-    Json::Value result;
-    Json::Reader reader;
-    orc_assert(reader.parse(body, result, false));
-
-    auto data(result["data"]);
-    co_return cpp_dec_float_50(data["amount"].asString());
+task<Float> Price(const std::string &from, const std::string &to, const Float &adjust) {
+    const auto response(co_await Request("GET", {"https", "api.coinbase.com", "443", "/v2/prices/" + from + "-" + to + "/spot"}, {}, {}));
+    const auto result(Parse(response.body_));
+    if (response.code_ == boost::beast::http::status::ok) {
+        const auto &data(result["data"]);
+        co_return Float(data["amount"].asString()) / adjust;
+    } else {
+        const auto &errors(result["errors"]);
+        orc_assert(errors.size() == 1);
+        const auto &error(errors[0]);
+        const auto id(error["id"].asString());
+        const auto message(error["message"].asString());
+        if (response.code_ == boost::beast::http::status::not_found && id == "not_found" && message == "Invalid base currency")
+            co_return 0;
+        orc_throw(response.code_ << "/" << id << ": " << message);
+    }
 }
 
 }

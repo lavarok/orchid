@@ -20,30 +20,36 @@
 /* }}} */
 
 
-pragma solidity 0.5.12;
+pragma solidity 0.5.13;
 
 contract OrchidLocation {
     struct Location {
         uint256 set_;
-        string url_;
-        string tls_;
-        string gpg_;
+        bytes url_;
+        bytes tls_;
+        bytes gpg_;
     }
 
     mapping (address => Location) private locations_;
 
-    event Update(address indexed target, string url, string tls, string gpg);
+    event Update(address indexed provider);
 
-    function move(string calldata url, string calldata tls, string calldata gpg) external {
+    function poke() external {
+        Location storage location = locations_[msg.sender];
+        location.set_ = block.timestamp;
+        emit Update(msg.sender);
+    }
+
+    function move(bytes calldata url, bytes calldata tls, bytes calldata gpg) external {
         Location storage location = locations_[msg.sender];
         location.set_ = block.timestamp;
         location.url_ = url;
         location.tls_ = tls;
         location.gpg_ = gpg;
-        emit Update(msg.sender, url, tls, gpg);
+        emit Update(msg.sender);
     }
 
-    function look(address target) external view returns (uint256, string memory, string memory, string memory) {
+    function look(address target) external view returns (uint256, bytes memory, bytes memory, bytes memory) {
         Location storage location = locations_[target];
         return (location.set_, location.url_, location.tls_, location.gpg_);
     }

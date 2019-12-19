@@ -30,6 +30,9 @@ class AppText {
             fontSize: fontSize));
   }
 
+  static TextStyle hopsInstructionsCallout = TextStyle(
+      color: Color(0xff28818f), fontWeight: FontWeight.bold, fontSize: 19.0);
+
   static TextStyle bodyStyle = TextStyle(
       color: AppColors.neutral_2,
       letterSpacing: 0.0,
@@ -117,10 +120,10 @@ class AppText {
 
   static TextStyle listItem = const TextStyle(
       color: const Color(0xff3a3149),
-      fontWeight: FontWeight.w400,
-      fontFamily: "Roboto",
+      fontWeight: FontWeight.w600,
+      //fontFamily: "Roboto",
       fontStyle: FontStyle.normal,
-      fontSize: 20.0);
+      fontSize: 16.0);
 
   static TextStyle dialogBody = const TextStyle(
       color: const Color(0xff504960),

@@ -16,11 +16,11 @@ class TrafficEmptyView extends StatelessWidget {
                 child: ConstrainedBox(
                     constraints: BoxConstraints(maxWidth: 450),
                     child: StreamBuilder<OrchidConnectionState>(
-                        initialData: OrchidConnectionState.Invalid,
                         stream: OrchidAPI().connectionStatus,
                         builder: (context, snapshot) {
+                          var state = OrchidAPI().connectionStatus.value;
                           bool connected;
-                          switch (snapshot.data) {
+                          switch (state) {
                             case OrchidConnectionState.Invalid:
                             case OrchidConnectionState.NotConnected:
                               connected = false;
@@ -46,7 +46,7 @@ class TrafficEmptyView extends StatelessWidget {
                                 SizedBox(height: 20),
                                 AppText.body(
                                     text: !connected
-                                        ? "This release is the first of our privacy tools. It is an Open Source, local traffic analyzer.\n\n   To get started, enable the VPN.   "
+                                        ? "This release is Orchid’s advanced VPN client, supporting multi-hop and local traffic analysis.\n\n   To get started, enable the VPN.   "
                                         : "Nothing to display yet. Traffic will appear here when there’s something to show.",
                                     fontSize: 15.0,
                                     color: AppColors.neutral_1),
@@ -54,7 +54,9 @@ class TrafficEmptyView extends StatelessWidget {
                                 Visibility(
                                   visible: orientation == Orientation.portrait,
                                   child: Image.asset(
-                                      "assets/images/analysisBunny.png"),
+                                    "assets/images/analysisBunny.png",
+                                    height: 330,
+                                  ),
                                 ),
                                 Spacer(flex: 1),
                               ],

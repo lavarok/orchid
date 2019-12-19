@@ -153,17 +153,24 @@ class Address :
     // NOLINTNEXTLINE (modernize-use-equals-default)
     using uint160_t::uint160_t;
 
-    Address(uint160_t &&value) :
-        uint160_t(std::move(value))
+    Address(const uint160_t &value) :
+        uint160_t(value)
     {
     }
 
+    Address(const std::string &address);
     Address(const Brick<64> &common);
 
     bool operator <(const Address &rhs) const {
         return static_cast<const uint160_t &>(*this) < static_cast<const uint160_t &>(rhs);
     }
+
+    bool operator ==(const Address &rhs) const {
+        return static_cast<const uint160_t &>(*this) == static_cast<const uint160_t &>(rhs);
+    }
 };
+
+std::ostream &operator <<(std::ostream &out, const Address &address);
 
 inline bool Each(const Address &address, const std::function<bool (const uint8_t *, size_t)> &code) {
     return Number<uint160_t>(address).each(code);
@@ -193,6 +200,9 @@ class Argument final {
     Argument(const boost::multiprecision::number<boost::multiprecision::backends::cpp_int_backend<Bits_, Bits_, boost::multiprecision::unsigned_magnitude, Check_, void>> &value) :
         value_("0x" + value.str(0, std::ios::hex))
     {
+    }
+
+    Argument(nullptr_t) {
     }
 
     Argument(bool value) :
@@ -428,9 +438,7 @@ struct Coded<Beam, void> {
         auto size(data.size());
         Coded<uint256_t>::Encode(builder, size);
         builder += data;
-        Beam pad(Pad(size));
-        memset(pad.data(), 0, pad.size());
-        builder += std::move(pad);
+        builder.append(Pad(size), 0);
     }
 
     static void Size(size_t &offset, const Buffer &data) {
@@ -464,9 +472,7 @@ struct Coded<std::string, void> {
         auto size(data.size());
         Coded<uint256_t>::Encode(builder, size);
         builder += Subset(data);
-        Beam pad(Pad(size));
-        memset(pad.data(), 0, pad.size());
-        builder += std::move(pad);
+        builder.append(Pad(size), 0);
     }
 
     static void Size(size_t &offset, const std::string &data) {
@@ -604,9 +610,8 @@ struct Coder {
     }
 };
 
-static const uint128_t Ten18("1000000000000000000");
-
 uint256_t Timestamp();
+uint256_t Monotonic();
 
 }
 

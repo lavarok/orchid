@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:orchid/pages/common/app_text_field.dart';
 import 'package:orchid/pages/common/formatting.dart';
+import 'package:orchid/pages/common/instructions_view.dart';
+import 'package:orchid/pages/common/screen_orientation.dart';
 import 'package:orchid/pages/common/tap_clears_focus.dart';
 import 'package:orchid/pages/common/titled_page_base.dart';
 import '../app_colors.dart';
 import '../app_text.dart';
-import 'circuit_hop.dart';
+import 'hop_editor.dart';
+import 'model/openvpn_hop.dart';
 
-/// Create / edit / view an Open VPN Hop
+/// Create / edit / view an OpenVPN Hop
 class OpenVPNHopPage extends HopEditor<OpenVPNHop> {
   OpenVPNHopPage(
       {@required editableHop, mode = HopEditorMode.View, onAddFlowComplete})
@@ -29,6 +32,10 @@ class _OpenVPNHopPageState extends State<OpenVPNHopPage> {
   @override
   void initState() {
     super.initState();
+
+    // Disable rotation until we update the screen design
+    ScreenOrientation.portrait();
+
     OpenVPNHop hop = widget.editableHop.value?.hop;
     _userName.text = hop?.userName;
     _userPassword.text = hop?.userPassword;
@@ -50,7 +57,7 @@ class _OpenVPNHopPageState extends State<OpenVPNHopPage> {
   Widget build(BuildContext context) {
     return TapClearsFocus(
       child: TitledPage(
-        title: "Open VPN Hop",
+        title: "OpenVPN Hop",
         actions: widget.mode == HopEditorMode.Create
             ? [widget.buildSaveButton(context)]
             : [],
@@ -59,34 +66,47 @@ class _OpenVPNHopPageState extends State<OpenVPNHopPage> {
           child: SafeArea(
             child: Column(
               children: <Widget>[
+                // Username
                 pady(16),
-                Row(
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Text("User name:",
+                    Text("Username:",
                         style: AppText.textLabelStyle.copyWith(fontSize: 20)),
-                    Expanded(child: AppTextField(controller: _userName))
-                  ],
-                ),
-                pady(16),
-                Row(
-                  children: <Widget>[
-                    Text("Password:",
-                        style: AppText.textLabelStyle.copyWith(fontSize: 20)),
-                    Expanded(child: AppTextField(controller: _userPassword))
+                    pady(8),
+                    AppTextField(
+                        hintText: "Username",
+                        margin: EdgeInsets.zero,
+                        controller: _userName)
                   ],
                 ),
 
-                // opvn config
+                // Password
+                pady(16),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text("Password:",
+                        style: AppText.textLabelStyle.copyWith(fontSize: 20)),
+                    pady(8),
+                    AppTextField(
+                        hintText: "Password",
+                        margin: EdgeInsets.zero,
+                        controller: _userPassword)
+                  ],
+                ),
+
+                // OPVN Config
                 pady(16),
                 Align(
                     alignment: Alignment.centerLeft,
                     child: Text("Config:",
                         style: AppText.textLabelStyle.copyWith(fontSize: 20))),
-                // TODO: This is copied from the configuration page, factor out?
                 Expanded(
+                  flex: 2,
                   child: Padding(
                     padding: const EdgeInsets.only(
-                        left: 16, right: 16, top: 24, bottom: 24),
+                        left: 0, right: 0, top: 8, bottom: 8),
                     child: Container(
                       padding:
                           EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
@@ -100,6 +120,7 @@ class _OpenVPNHopPageState extends State<OpenVPNHopPage> {
                         controller: _ovpnConfig,
                         maxLines: 99999,
                         decoration: InputDecoration(
+                          hintText: "Paste your OVPN config file here",
                           border: InputBorder.none,
                           labelStyle: AppText.textLabelStyle,
                         ),
@@ -112,7 +133,23 @@ class _OpenVPNHopPageState extends State<OpenVPNHopPage> {
                       ),
                     ),
                   ),
-                )
+                ),
+
+                // Instructions
+                Visibility(
+                  visible: widget.mode == HopEditorMode.Create,
+                  child: Expanded(
+                    flex: 1,
+                    child: InstructionsView(
+                      // TODO: This screen is being told it's in landscape mode in the simulator?
+                      //hideInLandscape: false,
+                      title: "Enter your credentials",
+                      body:
+                          "Enter the login information for your VPN provider above. Then paste the contents of your provider’s OpenVPN config file into the field provided. ",
+                    ),
+                  ),
+                ),
+                pady(24)
               ],
             ),
           ),
@@ -134,6 +171,7 @@ class _OpenVPNHopPageState extends State<OpenVPNHopPage> {
   @override
   void dispose() {
     super.dispose();
+    ScreenOrientation.reset();
     _userName.removeListener(_updateHop);
     _userPassword.removeListener(_updateHop);
     _ovpnConfig.removeListener(_updateHop);

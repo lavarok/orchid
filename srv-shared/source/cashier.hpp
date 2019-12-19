@@ -26,41 +26,89 @@
 #include <mutex>
 #include <string>
 
+#include <cppcoro/async_manual_reset_event.hpp>
+
 #include "coinbase.hpp"
 #include "endpoint.hpp"
 #include "local.hpp"
+#include "locked.hpp"
 #include "locator.hpp"
+#include "station.hpp"
 
 namespace orc {
 
-class Cashier {
+typedef std::tuple<Address, Address> Identity;
+
+static std::string Combine(const Address &signer, const Address &funder) {
+    return Tie(signer, funder).hex();
+}
+
+struct Pot :
+    public cppcoro::async_manual_reset_event
+{
+    struct Locked_ {
+        uint128_t amount_ = 0;
+        uint128_t escrow_ = 0;
+        uint256_t unlock_ = 0;
+    }; Locked<Locked_> locked_;
+};
+
+class Cashier :
+    public Drain<Json::Value>
+{
   private:
-    Endpoint endpoint_;
-    const Address lottery_;
+    const Endpoint endpoint_;
+    const Locator locator_;
+
+    const Float price_;
+    const std::string currency_;
+
     const Address personal_;
     const std::string password_;
+
+    const Address lottery_;
+    const uint256_t chain_;
     const Address recipient_;
 
-    mutable std::mutex mutex_;
-    uint256_t price_;
+    struct Prices_ {
+        Float eth_ = 0;
+        Float oxt_ = 0;
+    }; Locked<Prices_> prices_;
 
-    task<void> Update(cpp_dec_float_50 price, const std::string &currency);
+    U<Station> station_;
+
+    struct Cache_ {
+        std::map<uint128_t, Identity> subscriptions_;
+        std::map<Identity, S<Pot>> pots_;
+    }; Locked<Cache_> cache_;
+
+    task<void> Update();
+    task<void> Look(const Address &signer, const Address &funder, const std::string &combined);
+
+  protected:
+    void Land(Json::Value data) override;
+    void Stop(const std::string &error) override;
 
   public:
-    Cashier(Endpoint endpoint, Address lottery, const std::string &price, const std::string &currency, Address personal, std::string password, Address recipient);
+    Cashier(Endpoint endpoint, Locator locator, const Float &price, std::string currency, const Address &personal, std::string password, const Address &lottery, const uint256_t &chain, const Address &recipient);
 
-    uint256_t Bill(size_t size) const {
-        std::unique_lock<std::mutex> lock(mutex_);
-        return price_ * size;
+    virtual ~Cashier() = default;
+
+    auto Tuple() const {
+        return std::tie(lottery_, chain_, recipient_);
     }
 
-    Address Recipient() const {
-        return recipient_;
-    }
+    Float Bill(size_t size) const;
+    checked_int256_t Convert(const Float &balance) const;
+
+    Float Credit(const uint256_t &now, const uint256_t &start, const uint256_t &until, const uint256_t &amount, const uint256_t &gas) const;
+    task<void> Check(const Address &signer, const Address &funder, const uint128_t &amount, const Address &recipient, const Buffer &receipt);
 
     template <typename Selector_, typename... Args_>
-    task<void> Send(Selector_ &selector, Args_ &&...args) {
-        co_await selector.Send(endpoint_, personal_, password_, lottery_, std::forward<Args_>(args)...);
+    void Send(Selector_ &selector, const uint256_t &gas, Args_ &&...args) {
+        Spawn([=]() mutable -> task<void> {
+            co_await selector.Send(endpoint_, personal_, password_, lottery_, gas, 10*Gwei, std::forward<Args_>(args)...);
+        });
     }
 };
 

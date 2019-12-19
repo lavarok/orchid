@@ -107,7 +107,7 @@ export function orchidInitEthereum(providerUpdateCallback?: (props: any) => void
 
       try {
         OrchidContracts.token = new web3.eth.Contract(OrchidContracts.token_abi, OrchidContracts.token_addr);
-        OrchidContracts.lottery = new web3.eth.Contract(OrchidContracts.lottery_abi, OrchidContracts.lottery_addr);
+        OrchidContracts.lottery = new web3.eth.Contract(OrchidContracts.lottery_abi, OrchidContracts.lottery_addr());
       } catch (err) {
         console.log("Error constructing contracts");
         resolve(WalletStatus.Error);
@@ -162,7 +162,7 @@ export async function orchidAddFunds(funder: Address, signer: Address, amount: B
   async function doApproveTx() {
     return new Promise<string>(function (resolve, reject) {
       OrchidContracts.token.methods.approve(
-        OrchidContracts.lottery_addr,
+        OrchidContracts.lottery_addr(),
         total.toString()
       ).send({
         from: funder,
@@ -253,19 +253,23 @@ export async function orchidMoveFundsToEscrow(funder: Address, signer: Address, 
 
 export async function orchidWithdrawFunds(funder: Address, signer: Address, targetAddress: Address, amount: BigInt): Promise<string> {
   console.log(`withdrawFunds to: ${targetAddress} amount: ${amount}`);
+  // pull(address signer, address payable target, bool autolock, uint128 amount, uint128 escrow) external {
+  let autolock = true;
+  let escrow = BigInt(0);
   return evalOrchidTx(
-    OrchidContracts.lottery.methods.pull(signer, targetAddress, amount.toString()).send({
+    OrchidContracts.lottery.methods.pull(signer, targetAddress, autolock, amount.toString(), escrow.toString()).send({
       from: funder,
       gas: OrchidContracts.lottery_pull_amount_max_gas,
     })
   );
 }
 
-/// Pull all funds and escrow, subjet to lock time.
+/// Pull all funds and escrow, subject to lock time.
 export async function orchidWithdrawFundsAndEscrow(funder: Address, signer: Address, targetAddress: Address): Promise<string> {
   console.log("withdrawFundsAndEscrow");
+  let autolock = true;
   return evalOrchidTx(
-    OrchidContracts.lottery.methods.pull(signer, targetAddress).send({
+    OrchidContracts.lottery.methods.yank(signer, targetAddress, autolock).send({
       from: funder,
       gas: OrchidContracts.lottery_pull_all_max_gas
     })

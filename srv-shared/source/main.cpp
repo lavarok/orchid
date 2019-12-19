@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <iostream>
 #include <mutex>
+#include <regex>
 
 #include <unistd.h>
 
@@ -44,6 +45,7 @@
 
 #include "baton.hpp"
 #include "cashier.hpp"
+#include "ens.hpp"
 #include "channel.hpp"
 #include "egress.hpp"
 #include "jsonrpc.hpp"
@@ -84,9 +86,9 @@ int Main(int argc, const char *const argv[]) {
 
     { po::options_description group("orchid eth addresses");
     group.add_options()
-        //("token", po::value<std::string>()->default_value("0xff9978B7b309021D39a76f52Be377F2B95D72394"))
-        ("location", po::value<std::string>()->default_value("0xE214330bDd412F07d8FC4d4960698c0D657e1774"))
-        ("lottery", po::value<std::string>()->default_value("0xF28eE3675D0C9Fe8f29aBD25dA4AE0d940FE8239"))
+        //("token", po::value<std::string>()->default_value("0x4575f41308EC1483f3d399aa9a2826d74Da13Deb"))
+        ("lottery", po::value<std::string>()->default_value("0xb02396f06CC894834b7934ecF8c8E5Ab5C1d12F1"))
+        ("location", po::value<std::string>()->default_value("0xEF7bc12e0F6B02fE2cb86Aa659FdC3EBB727E0eD"))
     ; options.add(group); }
 
     { po::options_description group("user eth addresses");
@@ -99,7 +101,9 @@ int Main(int argc, const char *const argv[]) {
 
     { po::options_description group("external resources");
     group.add_options()
+        ("chainid", po::value<unsigned>()->default_value(1), "ropsten = 3; rinkeby = 4; goerli = 5")
         ("rpc", po::value<std::string>()->default_value("http://127.0.0.1:8545/"), "ethereum json/rpc private API endpoint")
+        ("ws", po::value<std::string>()->default_value("ws://127.0.0.1:8546/"), "ethereum websocket private API endpoint")
         ("stun", po::value<std::string>()->default_value("stun.l.google.com:19302"), "stun server url to use for discovery")
     ; options.add(group); }
 
@@ -127,10 +131,14 @@ int Main(int argc, const char *const argv[]) {
         ("ovpn-pass", po::value<std::string>()->default_value(""), "openvpn client credential (password)")
     ; options.add(group); }
 
-    po::store(po::parse_command_line(argc, argv, po::options_description()
+    po::positional_options_description positional;
+
+    po::store(po::command_line_parser(argc, argv).options(po::options_description()
         .add(group)
         .add(options)
-    ), args);
+    ).positional(positional).style(po::command_line_style::default_style
+        ^ po::command_line_style::allow_guessing
+    ).run(), args);
 
     if (auto path = getenv("ORCHID_CONFIG"))
         po::store(po::parse_config_file(path, po::options_description()
@@ -176,7 +184,7 @@ int Main(int argc, const char *const argv[]) {
     std::string chain;
 
     if (args.count("tls") == 0) {
-        auto pem(Certify()->ToPEM());
+        const auto pem(Certify()->ToPEM());
 
         key = pem.private_key();
         chain = pem.certificate();
@@ -228,6 +236,13 @@ int Main(int argc, const char *const argv[]) {
             orc_assert(PEM_write_bio_X509(bio.get(), x509.get()));
             return bio;
         }());
+
+        for (auto e(stack != nullptr ? sk_X509_num(stack.get()) : 0), i(decltype(e)(0)); i != e; i++)
+            chain += Stringify([&]() {
+                bssl::UniquePtr<BIO> bio(BIO_new(BIO_s_mem()));
+                orc_assert(PEM_write_bio_X509(bio.get(), sk_X509_value(stack.get(), i)));
+                return bio;
+            }());
     }
 
 
@@ -246,26 +261,31 @@ int Main(int argc, const char *const argv[]) {
         // XXX: this should be the IP of "bind"
         host = boost::asio::ip::host_name();
 
-    auto port(args["port"].as<uint16_t>());
+    const auto port(args["port"].as<uint16_t>());
     auto path(args["path"].as<std::string>());
 
-    auto url("https://" + host + ":" + std::to_string(port) + path);
-    auto tls(fingerprint->algorithm + " " + fingerprint->GetRfc4572Fingerprint());
+    const Strung url("https://" + host + ":" + std::to_string(port) + path);
+    Bytes gpg;
+
+    Builder tls;
+    static const std::regex re("-");
+    tls += Object(std::regex_replace(fingerprint->algorithm, re, "").c_str());
+    tls += Subset(fingerprint->digest.data(), fingerprint->digest.size());
 
     std::cerr << "url = " << url << std::endl;
     std::cerr << "tls = " << tls << std::endl;
+    std::cerr << "gpg = " << gpg << std::endl;
 
 
     Address location(args["location"].as<std::string>());
-    Address personal(args["personal"].as<std::string>());
     std::string password(args["password"].as<std::string>());
-    Address recipient(args.count("recipient") == 0 ? 0 : args["recipient"].as<std::string>());
+    Address recipient(args.count("recipient") == 0 ? "0x0000000000000000000000000000000000000000" : args["recipient"].as<std::string>());
 
     auto origin(args.count("network") == 0 ? Break<Local>() : Break<Local>(args["network"].as<std::string>()));
 
 
     {
-        auto offer(Wait(Description(origin, {"stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"})));
+        const auto offer(Wait(Description(origin, {"stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"})));
         std::cout << std::endl;
         std::cout << Filter(false, offer) << std::endl;
 
@@ -279,11 +299,11 @@ int Main(int argc, const char *const argv[]) {
         std::map<Socket, Socket> reflexive;
 
         for (size_t i(0); ; ++i) {
-            auto ices(jsep.candidates(i));
+            const auto ices(jsep.candidates(i));
             if (ices == nullptr)
                 break;
             for (size_t i(0), e(ices->count()); i != e; ++i) {
-                auto ice(ices->at(i));
+                const auto ice(ices->at(i));
                 orc_assert(ice != nullptr);
                 const auto &candidate(ice->candidate());
                 if (candidate.type() != "stun")
@@ -301,20 +321,32 @@ int Main(int argc, const char *const argv[]) {
     Endpoint endpoint(origin, rpc);
 
     if (args.count("provider") != 0) {
-        Address provider(args["provider"].as<std::string>());
+        const Address provider(args["provider"].as<std::string>());
 
         Wait([&]() -> task<void> {
-            auto latest(co_await endpoint.Latest());
-            static Selector<std::tuple<uint256_t, std::string, std::string, std::string>, Address> look("look");
-            if (Slice<1, 4>(co_await look.Call(endpoint, latest, location, provider)) != std::tie(url, tls, "")) {
-                static Selector<void, std::string, std::string, std::string> move("move", 3000000);
-                co_await move.Send(endpoint, provider, password, location, url, tls, "");
+            const auto latest(co_await endpoint.Latest());
+            static const Selector<std::tuple<uint256_t, Bytes, Bytes, Bytes>, Address> look("look");
+            if (Slice<1, 4>(co_await look.Call(endpoint, latest, location, 90000, provider)) != std::tie(url, tls, gpg)) {
+                static const Selector<void, Bytes, Bytes, Bytes> move("move");
+                co_await move.Send(endpoint, provider, password, location, 3000000, Beam(url), Beam(tls), {});
             }
         }());
     }
 
-    auto cashier(Make<Cashier>(std::move(endpoint), Address(args["lottery"].as<std::string>()), args["price"].as<std::string>(), args["currency"].as<std::string>(), std::move(personal), std::move(password), std::move(recipient)));
-    auto node(Make<Node>(origin, std::move(cashier), std::move(ice)));
+    const auto price(Float(args["price"].as<std::string>()) / (1024 * 1024 * 1024));
+
+    auto cashier([&]() -> S<Cashier> {
+        if (price == 0)
+            return nullptr;
+        const Address personal(args["personal"].as<std::string>());
+        return Make<Cashier>(std::move(endpoint), Locator::Parse(args["ws"].as<std::string>()),
+            price, args["currency"].as<std::string>(),
+            personal, password,
+            Address(args["lottery"].as<std::string>()), args["chainid"].as<unsigned>(), recipient
+        );
+    }());
+
+    const auto node(Make<Node>(origin, std::move(cashier), std::move(ice)));
 
     if (args.count("ovpn-file") != 0) {
         std::string ovpnfile;
@@ -323,7 +355,7 @@ int Main(int argc, const char *const argv[]) {
         auto username(args["ovpn-user"].as<std::string>());
         auto password(args["ovpn-pass"].as<std::string>());
 
-        Spawn([&node, origin, ovpnfile = std::move(ovpnfile), username = std::move(username), password = std::move(password)]() -> task<void> {
+        Spawn([&node, origin, ovpnfile = std::move(ovpnfile), username = std::move(username), password = std::move(password)]() mutable -> task<void> {
             auto egress(Make<Sink<Egress>>(0));
             co_await Connect(egress.get(), std::move(origin), 0, ovpnfile, username, password);
             node->Wire() = std::move(egress);

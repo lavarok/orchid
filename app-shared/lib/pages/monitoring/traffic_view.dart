@@ -6,6 +6,7 @@ import 'package:orchid/api/monitoring/analysis_db.dart';
 import 'package:orchid/pages/common/dialogs.dart';
 import 'package:orchid/pages/common/orchid_scroll.dart';
 import 'package:collection/collection.dart';
+import 'package:orchid/pages/common/titled_page_base.dart';
 
 import '../app_colors.dart';
 import '../app_gradients.dart';
@@ -16,7 +17,7 @@ import 'traffic_view_detail.dart';
 class TrafficView extends StatefulWidget {
   final ClearTrafficActionButtonController clearTrafficController;
 
-  const TrafficView({this.clearTrafficController});
+  const TrafficView({Key key, this.clearTrafficController}) : super(key: key);
 
   @override
   _TrafficViewState createState() => _TrafficViewState();
@@ -93,17 +94,21 @@ class _TrafficViewState extends State<TrafficView>
       child: SafeArea(
         child: Stack(
           children: <Widget>[
-            Visibility(visible: _showEmptyView(), child: TrafficEmptyView()),
             Visibility(
-              visible: !_showEmptyView(),
-              child: Column(
-                children: <Widget>[
-                  _buildSearchView(),
-                  _buildNewContentIndicator(),
-                  _buildResultListView()
-                ],
+              visible: _uiInitialized(),
+              replacement: Container(),
+              child: Visibility(
+                visible: _showEmptyView(),
+                child: TrafficEmptyView(),
+                replacement: Column(
+                  children: <Widget>[
+                    _buildSearchView(),
+                    _buildNewContentIndicator(),
+                    _buildResultListView()
+                  ],
+                ),
               ),
-            )
+            ),
           ],
         ),
       ),
@@ -372,6 +377,10 @@ class _TrafficViewState extends State<TrafficView>
   /// be shown.  Note that this does not include empty query results.
   bool _showEmptyView() {
     return _resultList != null && _resultList.isEmpty && _query.length < 1;
+  }
+
+  bool _uiInitialized() {
+    return _lastQuery != null;
   }
 
   /// Update the list with new content and scroll to the top

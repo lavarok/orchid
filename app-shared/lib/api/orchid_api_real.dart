@@ -5,11 +5,11 @@ import 'package:orchid/api/orchid_crypto.dart';
 import 'package:orchid/api/orchid_types.dart';
 import 'package:orchid/api/pricing.dart';
 import 'package:orchid/api/user_preferences.dart';
-import 'package:orchid/pages/circuit/circuit_hop.dart';
+import 'package:orchid/pages/circuit/model/circuit.dart';
+import 'package:orchid/pages/circuit/model/circuit_hop.dart';
 import 'package:orchid/util/ip_address.dart';
 import 'package:orchid/util/location.dart';
 import 'package:rxdart/rxdart.dart';
-
 import 'orchid_budget_api.dart';
 import 'orchid_log_api.dart';
 
@@ -78,9 +78,15 @@ class RealOrchidAPI implements OrchidAPI {
 
   /// The Flutter application uses this method to indicate to the native channel code
   /// that the UI has finished launching and all listeners have been established.
-  Future<void> applicationReady() {
+  Future<void> applicationReady() async {
     budget().applicationReady();
-    return _platform.invokeMethod('ready');
+    _platform.invokeMethod('ready');
+
+    // Write the config file on startup
+    await updateConfiguration();
+
+    // Set the initial VPN state from user preferences
+    setConnected(await UserPreferences().getDesiredVPNState());
   }
 
   /// Get the logging API.
@@ -231,7 +237,7 @@ class RealOrchidAPI implements OrchidAPI {
     // Concatenate the user config and generated config
     var combinedConfig = generatedConfig + "\n" + (userConfig ?? "");
 
-    print("Saving combined config = $combinedConfig");
+    //print("Saving combined config = $combinedConfig");
     return combinedConfig;
   }
 

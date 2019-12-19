@@ -41,6 +41,7 @@ namespace orc {
 
 using boost::multiprecision::uint128_t;
 using boost::multiprecision::uint256_t;
+using boost::multiprecision::checked_int256_t;
 
 class Region;
 class Beam;
@@ -51,19 +52,8 @@ class Buffer {
 
     virtual size_t size() const;
     virtual bool have(size_t value) const;
-
-    virtual bool zero() const {
-        return each([&](const uint8_t *data, size_t size) {
-            for (decltype(size) i(0); i != size; ++i)
-                if (data[i] != 0)
-                    return false;
-            return true;
-        });
-    }
-
-    virtual bool empty() const {
-        return size() == 0;
-    }
+    virtual bool zero() const;
+    virtual bool done() const;
 
     size_t copy(uint8_t *data, size_t size) const;
 
@@ -128,7 +118,7 @@ class Region :
 
     unsigned nib(size_t index) const {
         orc_assert((index >> 1) < size());
-        auto value(data()[index >> 1]);
+        const auto value(data()[index >> 1]);
         if ((index & 0x1) == 0)
             return value >> 4;
         else
@@ -180,7 +170,7 @@ class Span {
     Cast_ &take() {
         static_assert(sizeof(Type_) == 1);
         orc_assert(size_ >= sizeof(Type_));
-        auto value(reinterpret_cast<Cast_ *>(data()));
+        const auto value(reinterpret_cast<Cast_ *>(data()));
         data_ += sizeof(Type_);
         size_ -= sizeof(Type_);
         return *value;
@@ -458,7 +448,7 @@ class Brick final :
 };
 
 template <size_t Size_>
-inline bool operator ==(const Brick<Size_> &lhs, const Brick<Size_> &rhs) {
+inline bool operator ==(const Data<Size_> &lhs, const Data<Size_> &rhs) {
     return memcmp(lhs.data(), rhs.data(), Size_) == 0;
 }
 
@@ -636,29 +626,29 @@ Beam Bless(const std::string &data);
 
 template <typename Data_>
 inline bool operator ==(const Beam &lhs, const std::string &rhs) {
-    auto size(lhs.size());
+    const auto size(lhs.size());
     return size == rhs.size() && memcmp(lhs.data(), rhs.data(), size) == 0;
 }
 
 template <typename Data_>
 inline bool operator ==(const Beam &lhs, const Strung<Data_> &rhs) {
-    auto size(lhs.size());
+    const auto size(lhs.size());
     return size == rhs.size() && memcmp(lhs.data(), rhs.data(), size) == 0;
 }
 
 template <size_t Size_>
 inline bool operator ==(const Beam &lhs, const Brick<Size_> &rhs) {
-    auto size(lhs.size());
+    const auto size(lhs.size());
     return size == rhs.size() && memcmp(lhs.data(), rhs.data(), size) == 0;
 }
 
 inline bool operator ==(const Beam &lhs, const Range &rhs) {
-    auto size(lhs.size());
+    const auto size(lhs.size());
     return size == rhs.size() && memcmp(lhs.data(), rhs.data(), size) == 0;
 }
 
 inline bool operator ==(const Beam &lhs, const Beam &rhs) {
-    auto size(lhs.size());
+    const auto size(lhs.size());
     return size == rhs.size() && memcmp(lhs.data(), rhs.data(), size) == 0;
 }
 
@@ -667,6 +657,11 @@ bool operator ==(const Beam &lhs, const Buffer &rhs);
 template <typename Buffer_>
 inline bool operator !=(const Beam &lhs, const Buffer_ &rhs) {
     return !(lhs == rhs);
+}
+
+inline bool operator <(const Beam &lhs, const Beam &rhs) {
+    const auto size(lhs.size());
+    return size < rhs.size() || size == rhs.size() && memcmp(lhs.data(), rhs.data(), size) < 0;
 }
 
 class Nothing final :
@@ -848,7 +843,7 @@ class Window :
 
     bool each(const std::function<bool (const uint8_t *, size_t)> &code) const override {
         auto here(range_);
-        auto rest(ranges_.get() + count_ - here);
+        const auto rest(ranges_.get() + count_ - here);
         if (rest == 0)
             return true;
 
@@ -869,7 +864,7 @@ class Window :
     }
 
     void Stop() {
-        orc_assert(empty());
+        orc_assert(done());
     }
 
     template <typename Code_>
@@ -880,7 +875,7 @@ class Window :
         for (auto rest(ranges_.get() + count_ - here); need != 0; step = 0, ++here, --rest) {
             orc_assert(rest != 0);
 
-            auto size(here->size() - step);
+            const auto size(here->size() - step);
             if (size == 0)
                 continue;
 
@@ -965,30 +960,24 @@ class Rest final :
 };
 
 
-// XXX: omg why is this so inefficient?... please fix this :(
 class Builder :
-    public Buffer
+    public Region,
+    public std::basic_string<uint8_t>
 {
-  private:
-    // XXX: I mean, this should really be an std::vector<Beam>, right?
-    // XXX: but this whole thing should be something like std::string!
-    // XXX: and then you should be able to move a Builder to a Strung.
-    std::list<Beam> ranges_;
-
   public:
-    bool each(const std::function<bool (const uint8_t *, size_t)> &code) const override {
-        for (const auto &range : ranges_)
-            if (!code(range.data(), range.size()))
-                return false;
-        return true;
+    const uint8_t *data() const override {
+        return std::basic_string<uint8_t>::data();
+    }
+
+    size_t size() const override {
+        return std::basic_string<uint8_t>::size();
     }
 
     void operator +=(const Buffer &buffer) {
-        ranges_.emplace_back(buffer);
-    }
-
-    void operator +=(Beam &&beam) {
-        ranges_.emplace_back(std::move(beam));
+        buffer.each([&](const uint8_t *data, size_t size) {
+            append(data, size);
+            return true;
+        });
     }
 };
 
@@ -1127,7 +1116,7 @@ template <size_t Index_, typename... Nested_, typename... Taking_>
 struct Taking<Index_, std::tuple<Nested_...>, void, Taking_...> {
 template <typename Tuple_, typename Buffer_>
 static bool Take(Tuple_ &tuple, Window &window, Buffer_ &&buffer) {
-    auto stop(Taker<0, Nested_...>::Take(std::get<Index_>(tuple), window, std::forward<Buffer_>(buffer)));
+    const auto stop(Taker<0, Nested_...>::Take(std::get<Index_>(tuple), window, std::forward<Buffer_>(buffer)));
     orc_assert(stop);
     return Taker<Index_ + 1, Taking_...>::Take(tuple, window, std::forward<Buffer_>(buffer));
 } };

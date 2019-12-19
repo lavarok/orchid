@@ -18,12 +18,11 @@
 # }}}
 
 
-target := mac
+args := --config ../orchid.cfg
+
 include env/target.mk
 
 version := 0.9
-
-args := --config ../orchid.cfg
 
 .PHONY: all
 all: $(output)/$(default)/orchid$(exe)
@@ -38,7 +37,7 @@ leak: $(output)/$(default)/orchid$(exe)
 
 .PHONY: debug
 debug: $(output)/$(default)/orchid$(exe)
-	sudo lldb -o 'run $(args)' $<
+	sudo lldb -o 'b malloc_error_break' -o 'run $(args)' $<
 
 $(call include,vpn/target.mk)
 
@@ -49,6 +48,10 @@ endif
 ifeq ($(target),win)
 cflags += -Iall/vpn-windows/tap-windows6/src
 endif
+ifeq ($(target),lnx)
+cflags += -Iall/vpn-linux
+source += all/vpn-linux/protect.cpp
+endif
 
 source += $(wildcard source/*.cpp)
 
@@ -58,4 +61,6 @@ $(output)/%/orchid: $(patsubst %,$(output)/$$*/%,$(object) $(linked)) $(output)/
 	@echo [LD] $@
 	@set -o pipefail; $(cxx/$*) $(wflags) -o $@ $(filter %.o,$^) $(filter %.a,$^) $(lflags) 2>&1 | nl
 	@ls -la $@
+ifeq ($(target),mac)
 	@otool -lah $@ | grep '^  s.*__DATA' -A8 -B2
+endif

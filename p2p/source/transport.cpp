@@ -56,7 +56,7 @@ class Transport :
     asio::executor_work_guard<openvpn_io::io_context::executor_type> work_;
 
   protected:
-    virtual Pump *Inner() = 0;
+    virtual Pump<Buffer> *Inner() = 0;
 
     void Land(const Buffer &data) override {
         static size_t payload(65536);
@@ -171,7 +171,7 @@ class Factory :
             });
 
             orc_assert(config_.remote_list);
-            auto remote(config_.remote_list->first_item());
+            const auto remote(config_.remote_list->first_item());
             orc_assert(remote != nullptr);
 
             co_await origin_->Associate(transport.get(), remote->server_host, remote->server_port);
@@ -195,7 +195,7 @@ class Factory :
 class Middle :
     public openvpn::ClientAPI::OpenVPNClient,
     public openvpn::TunClientFactory,
-    public Link
+    public Link<Buffer>
 {
   private:
     class Tunnel :
@@ -270,11 +270,11 @@ class Middle :
     uint32_t local_;
 
   protected:
-    virtual Pipe *Inner() = 0;
+    virtual Pipe<Buffer> *Inner() = 0;
 
     void Land(const Buffer &data) override {
         //std::cerr << data << std::endl;
-        Link::Land(data);
+        Link<Buffer>::Land(data);
     }
 
     void Stop(const std::string &error) override {
@@ -283,7 +283,7 @@ class Middle :
 
   public:
     Middle(BufferDrain *drain, S<Origin> origin, uint32_t local) :
-        Link(drain),
+        Link<Buffer>(drain),
         origin_(std::move(origin)),
         local_(local)
     {

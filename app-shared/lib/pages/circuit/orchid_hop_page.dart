@@ -10,17 +10,19 @@ import 'package:orchid/api/user_preferences.dart';
 import 'package:orchid/pages/common/app_buttons.dart';
 import 'package:orchid/pages/common/app_text_field.dart';
 import 'package:orchid/pages/common/formatting.dart';
+import 'package:orchid/pages/common/instructions_view.dart';
+import 'package:orchid/pages/common/screen_orientation.dart';
 import 'package:orchid/pages/common/tap_clears_focus.dart';
 import 'package:orchid/pages/common/titled_page_base.dart';
 import 'package:orchid/pages/keys/add_key_page.dart';
-import 'package:orchid/util/hex.dart';
 import 'package:orchid/util/units.dart';
 import '../app_colors.dart';
 import '../app_text.dart';
 import 'budget_page.dart';
-import 'circuit_hop.dart';
 import 'curator_page.dart';
+import 'hop_editor.dart';
 import 'key_selection.dart';
+import 'model/orchid_hop.dart';
 
 /// Create / edit / view an Orchid Hop
 class OrchidHopPage extends HopEditor<OrchidHop> {
@@ -41,12 +43,16 @@ class _OrchidHopPageState extends State<OrchidHopPage> {
   StoredEthereumKeyRef _initialKeyRef;
   StoredEthereumKeyRef _selectedKeyRef;
   bool _showBalance = false;
-  OXT _balance; // initially null
+  LotteryPot _lotteryPot; // initially null
   Timer _balanceTimer;
 
   @override
   void initState() {
     super.initState();
+    // Disable rotation until we update the screen design
+    if (widget.readOnly()) {
+      ScreenOrientation.portrait();
+    }
     initStateAsync();
   }
 
@@ -61,7 +67,7 @@ class _OrchidHopPageState extends State<OrchidHopPage> {
     // Init the UI from the supplied hop
     setState(() {
       OrchidHop hop = _hop();
-      _funderField.text = hop?.funder;
+      _funderField.text = hop?.funder?.toString();
       _selectedKeyRef = hop?.keyRef;
       _curatorField.text = hop?.curator;
       _initialKeyRef = _selectedKeyRef;
@@ -69,7 +75,8 @@ class _OrchidHopPageState extends State<OrchidHopPage> {
     _funderField.addListener(_textFieldChanged);
 
     // init balance polling
-    if (await UserPreferences().getQueryBalances()) {
+    // TODO: Disabled balances
+    if (false /*widget.readOnly() && await UserPreferences().getQueryBalances()*/) {
       setState(() {
         _showBalance = true;
       });
@@ -120,6 +127,15 @@ class _OrchidHopPageState extends State<OrchidHopPage> {
       child: Column(
         children: <Widget>[
           _buildFunding(),
+          pady(24),
+          Expanded(
+            child: InstructionsView(
+              image: Image.asset("assets/images/group7.png"),
+              title: "Link your account",
+              body:
+                  "To link your hop with your Orchid credentials, enter your Ethereum address and designate a signer key above. Manage your Orchid account using your preferred dApp browser."
+            ),
+          ),
         ],
       ),
     );
@@ -131,7 +147,7 @@ class _OrchidHopPageState extends State<OrchidHopPage> {
       child: Column(
         children: <Widget>[
           _buildSection(
-              title: "Funding", child: _buildFunding(), onDetail: null),
+              title: "Credentials", child: _buildFunding(), onDetail: null),
           pady(16),
           divider(),
           pady(24),
@@ -143,7 +159,7 @@ class _OrchidHopPageState extends State<OrchidHopPage> {
           divider(),
           pady(24),
           _buildSection(
-              title: "Budget", child: _buildBudget(), onDetail: _editBudget),
+              title: "Rate Limit", child: _buildBudget(), onDetail: _editBudget),
         ],
       ),
     );
@@ -182,98 +198,115 @@ class _OrchidHopPageState extends State<OrchidHopPage> {
     const valueStyle = TextStyle(
         color: color,
         fontSize: 15.0,
-        fontWeight: FontWeight.normal,
+        fontWeight: FontWeight.bold,
         letterSpacing: -0.24,
         fontFamily: "SFProText-Regular",
         height: 20.0 / 15.0);
-    var balanceText =
-        _balance != null ? _balance.toStringAsFixed(4) + " OXT" : "...";
+    var balanceText = _lotteryPot?.balance != null
+        ? _lotteryPot?.balance.toStringAsFixed(4) + " OXT"
+        : "...";
+    var depositText = _lotteryPot?.deposit != null
+        ? _lotteryPot?.deposit.toStringAsFixed(4) + " OXT"
+        : "...";
     return Column(
       children: <Widget>[
-        // Balance (if enabled)
+        // Balance and Deposit
         Visibility(
           visible: _showBalance,
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              Container(
-                padding: EdgeInsets.only(top: 8, bottom: 16),
-                width: 80,
-                child: Text("Balance:",
-                    style: AppText.textLabelStyle.copyWith(
-                        fontSize: 20,
-                        color: _funderValid()
-                            ? AppColors.neutral_1
-                            : AppColors.neutral_3)),
-              ),
-              Expanded(
-                  child: Padding(
-                padding: EdgeInsets.all(8.0),
+              // Balance
+              Text("Amount:",
+                  style: AppText.textLabelStyle
+                      .copyWith(fontSize: 20, color: AppColors.neutral_1)),
+              pady(4),
+              Padding(
+                padding: EdgeInsets.only(top: 10, bottom: 8, left: 16),
                 child: Text(balanceText,
-                    textAlign: TextAlign.right, style: valueStyle),
-              ))
+                    textAlign: TextAlign.left, style: valueStyle),
+              ),
+              pady(16),
+              // Deposit
+              Text("Deposit:",
+                  style: AppText.textLabelStyle
+                      .copyWith(fontSize: 20, color: AppColors.neutral_1)),
+              pady(4),
+              Padding(
+                padding: EdgeInsets.only(top: 10, bottom: 8, left: 16),
+                child: Text(depositText,
+                    textAlign: TextAlign.left, style: valueStyle),
+              ),
+              pady(16)
             ],
           ),
         ),
 
         // Wallet address (funder)
-        Row(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Container(
-              width: 70,
-              child: Text("Funder:",
-                  style: AppText.textLabelStyle.copyWith(
-                      fontSize: 20,
-                      color: _funderValid()
-                          ? AppColors.neutral_1
-                          : AppColors.neutral_3)),
-            ),
-            Expanded(
-                child: AppTextField(
+            Text("Ethereum Address:",
+                style: AppText.textLabelStyle.copyWith(
+                    fontSize: 20,
+                    color: _funderValid()
+                        ? AppColors.neutral_1
+                        : AppColors.neutral_3)),
+            pady(widget.readOnly() ? 4 : 8),
+            AppTextField(
+              hintText: "Paste here",
+              margin: EdgeInsets.zero,
               controller: _funderField,
               readOnly: widget.readOnly(),
               enabled: widget.editable(),
-            ))
+            )
           ],
         ),
 
-        // Signer
-        pady(widget.readOnly() ? 0 : 8),
-        Row(
+        // Signer key
+        pady(widget.readOnly() ? 0 : 16),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Container(
-              width: 70,
-              child: Text("Signer:",
-                  style: AppText.textLabelStyle.copyWith(
-                      fontSize: 20,
-                      color: _keyRefValid()
-                          ? AppColors.neutral_1
-                          : AppColors.neutral_3)),
-            ),
-            Expanded(
-                child: Padding(
-              padding: const EdgeInsets.only(left: 20, right: 16),
-              child: KeySelection(
-                  key: ValueKey(_initialKeyRef.toString()),
-                  enabled: widget.editable(),
-                  initialSelection: _initialKeyRef,
-                  onSelection: _keySelected),
-            )),
+            Text("Signer Key:",
+                style: AppText.textLabelStyle.copyWith(
+                    fontSize: 20,
+                    color: _keyRefValid()
+                        ? AppColors.neutral_1
+                        : AppColors.neutral_3)),
+            pady(4),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 16),
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 16.0),
+                      child: KeySelection(
+                          key: ValueKey(_initialKeyRef.toString()),
+                          enabled: widget.editable(),
+                          initialSelection: _initialKeyRef,
+                          onSelection: _keySelected),
+                    ),
+                  ),
+                ),
+                // Copy key button
+                Visibility(
+                  visible: widget.readOnly(),
+                  child: RoundedRectRaisedButton(
+                      backgroundColor: Colors.grey,
+                      textColor: Colors.white,
+                      text: "Copy",
+                      onPressed: _onCopyButton),
+                ),
 
-            // Copy key button
-            Visibility(
-              visible: widget.readOnly(),
-              child: RoundedRectRaisedButton(
-                  backgroundColor: Colors.grey,
-                  textColor: Colors.white,
-                  text: "Copy",
-                  onPressed: _onCopyButton),
+                // Add key button
+                Visibility(
+                  visible: widget.editable(),
+                  child: _buidAddKeyButton(),
+                )
+              ],
             ),
-
-            // Add key button
-            Visibility(
-              visible: widget.editable(),
-              child: _buidAddKeyButton(),
-            )
           ],
         ),
       ],
@@ -306,7 +339,7 @@ class _OrchidHopPageState extends State<OrchidHopPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         pady(16),
-        Text("View or modify your budget.",
+        Text("View or modify your rate limit.",
             textAlign: TextAlign.left, style: AppText.dialogBody),
       ],
     );
@@ -314,7 +347,7 @@ class _OrchidHopPageState extends State<OrchidHopPage> {
 
   Widget _buidAddKeyButton() {
     return Container(
-      width: 30,
+      width: 35,
       child: FlatButton(
           padding: EdgeInsets.only(right: 5),
           child: Icon(Icons.add_circle_outline, color: Colors.grey),
@@ -356,7 +389,6 @@ class _OrchidHopPageState extends State<OrchidHopPage> {
       EthereumAddress.parse(_funderField.text);
       return true;
     } catch (err) {
-      print(err);
       return false;
     }
   }
@@ -365,8 +397,14 @@ class _OrchidHopPageState extends State<OrchidHopPage> {
     if (!widget.editable()) {
       return;
     }
+    EthereumAddress funder;
+    try {
+      funder = EthereumAddress.from(_funderField.text);
+    } catch (err) {
+      funder = null; // don't update it
+    }
     widget.editableHop.update(OrchidHop.from(widget.editableHop.value?.hop,
-        funder: Hex.removePrefix(_funderField.text), keyRef: _selectedKeyRef));
+        funder: funder, keyRef: _selectedKeyRef));
   }
 
   /// Copy the log data to the clipboard
@@ -411,6 +449,7 @@ class _OrchidHopPageState extends State<OrchidHopPage> {
   @override
   void dispose() {
     super.dispose();
+    ScreenOrientation.reset();
     _funderField.removeListener(_textFieldChanged);
     _balanceTimer?.cancel();
   }
@@ -419,18 +458,18 @@ class _OrchidHopPageState extends State<OrchidHopPage> {
     print("polling balance");
     try {
       // funder and signer from the stored hop
-      EthereumAddress funder = EthereumAddress.from(_hop()?.funder);
+      EthereumAddress funder = _hop()?.funder;
       StoredEthereumKey signerKey = await _hop()?.keyRef?.get();
       EthereumAddress signer = EthereumAddress.from(signerKey.keys().address);
       // Fetch the pot balance
       LotteryPot pot = await CloudFlare.getLotteryPot(funder, signer);
       setState(() {
-        _balance = pot.balance;
+        _lotteryPot = pot;
       });
     } catch (err) {
       print("Can't fetch balance: $err");
       setState(() {
-        _balance = null; // no balance available
+        _lotteryPot = null; // no balance available
       });
     }
   }

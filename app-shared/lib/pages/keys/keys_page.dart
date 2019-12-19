@@ -133,23 +133,23 @@ class _KeysPageState extends State<KeysPage> {
 }
 
 class FloatingAddButton extends StatelessWidget {
+  final EdgeInsetsGeometry padding;
+
   const FloatingAddButton({
     Key key,
     @required this.onPressed,
+    this.padding,
   }) : super(key: key);
 
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerRight,
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: FloatingActionButton(
-          child: Icon(Icons.add),
-          onPressed: onPressed,
-        ),
+    return Padding(
+      padding: padding ?? const EdgeInsets.all(24.0),
+      child: FloatingActionButton(
+        child: Icon(Icons.add),
+        onPressed: onPressed,
       ),
     );
   }

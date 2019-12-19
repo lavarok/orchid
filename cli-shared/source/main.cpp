@@ -42,6 +42,8 @@
 #include <net/if_utun.h>
 #include <sys/sys_domain.h>
 #include <sys/kern_control.h>
+#elif defined(__linux__)
+#include <linux/if_tun.h>
 #endif
 
 #include <boost/asio/generic/datagram_protocol.hpp>
@@ -57,13 +59,17 @@
 #include "port.hpp"
 #include "protect.hpp"
 #include "sync.hpp"
+#include "syncfile.hpp"
 #include "syscall.hpp"
 #include "task.hpp"
+#include "file.hpp"
 #include "transport.hpp"
 
 #if 0
 #elif defined(__APPLE__)
 #include "family.hpp"
+#elif defined(__linux__)
+#include "packetinfo.hpp"
 #endif
 
 namespace orc {
@@ -82,6 +88,7 @@ int Main(int argc, const char *const argv[]) {
     po::options_description options("command-line (only)");
     options.add_options()
         ("help", "produce help message")
+        ("capture", po::value<std::string>(), "single ip address to capture")
         ("config", po::value<std::string>(), "configuration file for client configuration")
     ;
 
@@ -131,14 +138,55 @@ int Main(int argc, const char *const argv[]) {
 
     auto utun("utun" + std::to_string(address.sc_unit - 1));
     orc_assert(system(("ifconfig " + utun + " inet " + local.String() + " " + local.String() + " mtu 1500 up").c_str()) == 0);
-    orc_assert(system(("route -n add 207.254.46.169 -interface " + utun).c_str()) == 0);
+    if (args.count("capture") != 0)
+        orc_assert(system(("route -n add " + args["capture"].as<std::string>() + " -interface " + utun).c_str()) == 0);
+    else {
+        // XXX: having a default route causes connect() to fail with "Network is unreachable"
+        //orc_assert(system(("route -n add 0.0.0.0/1 -interface " + utun).c_str()) == 0);
+        //orc_assert(system(("route -n add 128.0.0.0/1 -interface " + utun).c_str()) == 0);
+        orc_assert(system(("route -n add 1/8 -interface " + utun).c_str()) == 0);
+        orc_assert(system(("route -n add 2/7 -interface " + utun).c_str()) == 0);
+        orc_assert(system(("route -n add 4/6 -interface " + utun).c_str()) == 0);
+        orc_assert(system(("route -n add 8/5 -interface " + utun).c_str()) == 0);
+        orc_assert(system(("route -n add 16/4 -interface " + utun).c_str()) == 0);
+        orc_assert(system(("route -n add 32/3 -interface " + utun).c_str()) == 0);
+        orc_assert(system(("route -n add 64/2 -interface " + utun).c_str()) == 0);
+        orc_assert(system(("route -n add 128/1 -interface " + utun).c_str()) == 0);
+    }
     orc_assert(system(("route -n add 10.7.0.4 -interface " + utun).c_str()) == 0);
+#elif defined(__linux__)
+    auto family(capture->Wire<Sink<PacketInfo>>());
+    // XXX: NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+    auto sync(family->Wire<SyncFile<asio::posix::stream_descriptor>>(Context(), open("/dev/net/tun", O_RDWR)));
+
+    auto file((*sync)->native_handle());
+
+    struct ifreq ifr = {.ifr_flags = IFF_TUN | IFF_NO_PI};
+    // XXX: NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+    orc_assert(ioctl(file, TUNSETIFF, (void*)&ifr) >= 0);
+    char dev[IFNAMSIZ];
+    // XXX: correct memory management in this code ASAP after NL
+    // XXX: NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.strcpy,cppcoreguidelines-pro-type-union-access)
+    strcpy(dev, ifr.ifr_name);
+    std::string tun(dev);
+    orc_assert(system(("ifconfig " + tun + " inet " + local.String() + " " + local.String() + " mtu 1500 up").c_str()) == 0);
+    if (args.count("capture") != 0)
+        orc_assert(system(("route -n add " + args["capture"].as<std::string>() + " dev " + tun).c_str()) == 0);
+    else {
+        orc_assert(system(("route -n add 0.0.0.0/1 dev " + tun).c_str()) == 0);
+        orc_assert(system(("route -n add 128.0.0.0/1 dev " + tun).c_str()) == 0);
+    }
+    orc_assert(system(("route -n add 10.7.0.4 dev " + tun).c_str()) == 0);
 #else
 #error
 #endif
 
-    setgid(501);
-    setuid(501);
+    // XXX: we need CAP_NET_RAW capability for SO_BINDTODEVICE
+#if !defined(__linux__)
+    // XXX: rage against the cage, my friend :(
+    (void) setgid(501);
+    (void) setuid(501);
+#endif
 
     Wait([&]() -> task<void> { try {
         co_await Schedule();

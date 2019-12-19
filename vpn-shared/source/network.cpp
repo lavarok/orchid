@@ -20,57 +20,94 @@
 /* }}} */
 
 
+#include <openssl/obj_mac.h>
+
 #include "client.hpp"
 #include "endpoint.hpp"
+#include "ens.hpp"
 #include "local.hpp"
 #include "network.hpp"
+#include "sleep.hpp"
 
 namespace orc {
 
-Network::Network(const std::string &rpc, Address directory, Address location, Address curator) :
+Network::Network(const std::string &rpc, Address directory, Address location) :
     locator_(Locator::Parse(rpc)),
     directory_(std::move(directory)),
-    location_(std::move(location)),
-    curator_(std::move(curator))
+    location_(std::move(location))
 {
     generator_.seed(boost::random::random_device()());
 }
 
-task<void> Network::Random(Sunk<> *sunk, const S<Origin> &origin, const Beam &argument, const Secret &secret, Address funder) {
-    Endpoint endpoint(origin, locator_);
+task<void> Network::Random(Sunk<> *sunk, const S<Origin> &origin, const std::string &name, const Address &provider, Address lottery, uint256_t chain, const Secret &secret, Address funder) {
+    const Endpoint endpoint(origin, locator_);
 
-    auto latest(co_await endpoint.Latest());
-    //auto block(co_await endpoint.Header(latest));
+    // XXX: this adjustment is suboptimal; it seems to help?
+    const auto latest(co_await endpoint.Latest() - 1);
+    //const auto block(co_await endpoint.Header(latest));
 
     typedef std::tuple<Address, std::string, U<rtc::SSLFingerprint>> Descriptor;
-    auto [provider, url, fingerprint] = co_await [&]() -> task<Descriptor> {
-        //static const Address provider("0x2b1ce95573ec1b927a90cb488db113b40eeb064a");
-        //co_return Descriptor{provider, "https://local.saurik.com:8443/", rtc::SSLFingerprint::CreateUniqueFromRfc4572("sha-256", "A9:E2:06:F8:42:C2:2A:CC:0D:07:3C:E4:2B:8A:FD:26:DD:85:8F:04:E0:2E:90:74:89:93:E2:A5:58:53:85:15")};
-        //co_return Descriptor{provider, "https://mac.saurik.com:8084/", rtc::SSLFingerprint::CreateUniqueFromRfc4572("sha-256", "A9:E2:06:F8:42:C2:2A:CC:0D:07:3C:E4:2B:8A:FD:26:DD:85:8F:04:E0:2E:90:74:89:93:E2:A5:58:53:85:15")};
+    auto [address, url, fingerprint] = co_await [&]() -> task<Descriptor> {
+        //static const Address address("0x2b1ce95573ec1b927a90cb488db113b40eeb064a");
+        //co_return Descriptor{address, "https://local.saurik.com:8443/", rtc::SSLFingerprint::CreateUniqueFromRfc4572("sha-256", "A9:E2:06:F8:42:C2:2A:CC:0D:07:3C:E4:2B:8A:FD:26:DD:85:8F:04:E0:2E:90:74:89:93:E2:A5:58:53:85:15")};
+        //co_return Descriptor{address, "https://mac.saurik.com:8084/", rtc::SSLFingerprint::CreateUniqueFromRfc4572("sha-256", "A9:E2:06:F8:42:C2:2A:CC:0D:07:3C:E4:2B:8A:FD:26:DD:85:8F:04:E0:2E:90:74:89:93:E2:A5:58:53:85:15")};
 
-        retry: {
-            static Selector<std::tuple<Address, uint128_t>, uint128_t> pick("pick");
-            auto [address, delay] = co_await pick.Call(endpoint, latest, directory_, generator_());
+        static const Address ens("0x314159265dd8dbb310642f98f50c066173c1259b");
+
+        // XXX: parse the / out of name (but probably punt this to the frontend)
+        const auto node(Name(name));
+        Beam argument;
+
+        static const Selector<Address, Bytes32> resolver_("resolver");
+        const auto resolver(co_await resolver_.Call(endpoint, latest, ens, 90000, node));
+
+        static const Selector<Address, Bytes32> addr_("addr");
+        const auto curator(co_await addr_.Call(endpoint, latest, resolver, 90000, node));
+
+        for (;;) try {
+            static const Selector<std::tuple<Address, uint128_t>, uint128_t> pick_("pick");
+            auto [address, delay] = co_await pick_.Call(endpoint, latest, directory_, 90000, generator_());
             orc_assert(address != 0);
+            if (delay < 90*24*60*60)
+                continue;
 
-            if (curator_ != 0) {
-                static Selector<bool, Address, Bytes> good("good");
-                if (!co_await good.Call(endpoint, latest, curator_, address, argument))
-                    goto retry;
-            }
+            // XXX: this is a stupid hack
+            if (provider != 0)
+                address = provider;
 
-            static Selector<std::tuple<uint256_t, std::string, std::string, std::string>, Address> look("look");
-            auto [set, url, tls, gpg] = co_await look.Call(endpoint, latest, location_, address);
+            static const Selector<uint128_t, Address, Bytes> good_("good");
+            const auto adjust(co_await good_.Call(endpoint, latest, curator, 90000, address, argument));
+            if (adjust < generator_())
+                continue;
 
-            auto space(tls.find(' '));
-            orc_assert(space != std::string::npos);
+            static const Selector<std::tuple<uint256_t, Bytes, Bytes, Bytes>, Address> look_("look");
+            const auto [set, url, tls, gpg] = co_await look_.Call(endpoint, latest, location_, 90000, address);
 
-            co_return Descriptor{address, url, rtc::SSLFingerprint::CreateUniqueFromRfc4572(tls.substr(0, space), tls.substr(space + 1))};
+            Window window(tls);
+            orc_assert(window.Take() == 0x06);
+            window.Skip(Length(window));
+            Beam fingerprint(window);
+
+            static const std::map<Beam, std::string> algorithms_({
+                {Object(NID_md2), "md2"},
+                {Object(NID_md5), "md5"},
+                {Object(NID_sha1), "sha-1"},
+                {Object(NID_sha224), "sha-224"},
+                {Object(NID_sha256), "sha-256"},
+                {Object(NID_sha384), "sha-384"},
+                {Object(NID_sha512), "sha-512"},
+            });
+
+            const auto algorithm(algorithms_.find(Window(tls).Take(tls.size() - fingerprint.size())));
+            orc_assert(algorithm != algorithms_.end());
+            co_return Descriptor{address, url.str(), std::make_unique<rtc::SSLFingerprint>(algorithm->second, fingerprint.data(), fingerprint.size())};
+        } catch (const std::exception &error) {
+            co_await Sleep(2);
         }
     }();
 
     orc_assert(fingerprint != nullptr);
-    auto client(sunk->Wire<Client>(std::move(fingerprint), std::move(provider), secret, std::move(funder)));
+    const auto client(sunk->Wire<Client>(std::move(fingerprint), std::move(address), std::move(lottery), std::move(chain), secret, std::move(funder)));
     co_await client->Open(origin, url);
 }
 

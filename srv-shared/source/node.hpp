@@ -36,14 +36,15 @@ namespace orc {
 
 class Node final {
   private:
-    S<Origin> origin_;
-    S<Cashier> cashier_;
-    std::vector<std::string> ice_;
+    const S<Origin> origin_;
+    const S<Cashier> cashier_;
+    const std::vector<std::string> ice_;
 
     S<Egress> egress_;
 
-    std::mutex mutex_;
-    std::map<std::string, W<Server>> servers_;
+    struct Locked_ {
+        std::map<std::string, W<Server>> servers_;
+    }; Locked<Locked_> locked_;
 
   public:
     Node(S<Origin> origin, S<Cashier> cashier, std::vector<std::string> ice) :
@@ -58,11 +59,11 @@ class Node final {
     }
 
     S<Server> Find(const std::string &fingerprint) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        auto &cache(servers_[fingerprint]);
+        const auto locked(locked_());
+        auto &cache(locked->servers_[fingerprint]);
         if (auto server = cache.lock())
             return server;
-        auto server(Make<Sink<Server>>(origin_, cashier_));
+        auto server(Break<Sink<Server>>(origin_, cashier_));
         server->Wire<Translator>(egress_);
         server->self_ = server;
         cache = server;

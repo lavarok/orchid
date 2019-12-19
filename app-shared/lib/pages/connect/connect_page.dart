@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:orchid/api/orchid_types.dart';
+import 'package:orchid/api/user_preferences.dart';
 import 'package:orchid/pages/app_text.dart';
 import 'package:orchid/api/notifications.dart';
 import 'package:orchid/pages/common/gradients.dart';
@@ -15,6 +16,8 @@ import 'connect_world_map.dart';
 /// The main page containing the connect button.
 class QuickConnectPage extends StatefulWidget {
   static bool allowScrolling = false;
+
+  QuickConnectPage({Key key}) : super(key: key);
 
   @override
   _QuickConnectPageState createState() => _QuickConnectPageState();
@@ -301,9 +304,10 @@ class _QuickConnectPageState
     return Container(
       // Note: the emoji changes the baseline so we give this a couple of pixels
       // Note: of extra hieght and bottom align it.
-      height: 18.0,
+      height: 32.0,
       alignment: Alignment.bottomCenter,
       child: Text(message,
+          textAlign: TextAlign.center,
           style: AppText.connectButtonMessageStyle.copyWith(color: color)),
     );
   }
@@ -367,9 +371,10 @@ class _QuickConnectPageState
       });
     }
 
-    setState(() {
-      _connectionState = state;
-    });
+    _connectionState = state;
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   /// Called upon a change to Orchid sync state
@@ -462,6 +467,7 @@ class _QuickConnectPageState
 
   // duplicates code in monitoring_page
   void _checkPermissionAndEnableConnection() {
+    UserPreferences().setDesiredVPNState(true);
     // Get the most recent status, blocking if needed.
     _rxSubscriptions
         .add(OrchidAPI().vpnPermissionStatus.take(1).listen((installed) async {
@@ -488,6 +494,7 @@ class _QuickConnectPageState
   }
 
   void _disableConnection() {
+    UserPreferences().setDesiredVPNState(false);
     OrchidAPI().setConnected(false);
   }
 

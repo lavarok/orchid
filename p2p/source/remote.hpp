@@ -44,7 +44,7 @@ class Remote :
     static err_t Initialize(netif *interface);
 
   protected:
-    virtual Pump *Inner() = 0;
+    virtual Pump<Buffer> *Inner() = 0;
 
     void Land(const Buffer &data) override;
     void Stop(const std::string &error) override;
@@ -65,7 +65,7 @@ class Remote :
 
     task<Socket> Associate(Sunk<> *sunk, const std::string &host, const std::string &port) override;
     task<Socket> Connect(U<Stream> &stream, const std::string &host, const std::string &port) override;
-    task<Socket> Unlid(Sunk<Opening, BufferSewer> *sunk) override;
+    task<Socket> Unlid(Sunk<BufferSewer, Opening> *sunk) override;
 };
 
 }

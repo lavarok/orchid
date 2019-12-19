@@ -26,15 +26,19 @@
 #include <map>
 #include <set>
 
+#include <rtc_base/rtc_certificate.h>
+
 #include "bond.hpp"
-#include "cashier.hpp"
-#include "endpoint.hpp"
-#include "link.hpp"
 #include "jsonrpc.hpp"
+#include "link.hpp"
+#include "locked.hpp"
+#include "nest.hpp"
 #include "shared.hpp"
 #include "task.hpp"
 
 namespace orc {
+
+class Cashier;
 
 class Server :
     public Bonded,
@@ -44,27 +48,42 @@ class Server :
   public:
     S<Server> self_;
   private:
+    const rtc::scoped_refptr<rtc::RTCCertificate> local_;
+
     const S<Origin> origin_;
     const S<Cashier> cashier_;
-    uint256_t balance_;
 
-    std::mutex mutex_;
+    Nest nest_;
 
-    std::map<Bytes32, std::pair<Bytes32, uint256_t>> reveals_;
-    decltype(reveals_.end()) commit_ = reveals_.end();
+    static const size_t horizon_ = 10;
 
-    std::set<std::tuple<uint256_t, Address, Bytes32>> tickets_;
+    struct Locked_ {
+        uint64_t serial_ = 0;
+        Float balance_ = 0;
 
-    void Bill(Pipe *pipe, const Buffer &data);
+        std::map<Bytes32, std::pair<Bytes32, uint256_t>> reveals_;
+        decltype(reveals_.end()) commit_ = reveals_.end();
+
+        uint256_t issued_ = 0;
+        std::set<std::tuple<uint256_t, Bytes32, Address>> nonces_;
+    }; Locked<Locked_> locked_;
+
+    bool Bill(const Buffer &data, bool force);
+
+    task<void> Send(Pipe *pipe, const Buffer &data, bool force);
+    void Send(Pipe *pipe, const Buffer &data);
+
     task<void> Send(const Buffer &data) override;
 
-    void Commit();
+    void Commit(const Lock<Locked_> &locked);
 
-    task<void> Invoice(Pipe<Buffer> *pipe, const Socket &destination, const Bytes32 &id, const Bytes32 &commit);
-    task<void> Invoice(Pipe<Buffer> *pipe, const Socket &destination, const Bytes32 &id = Zero<32>());
+    task<void> Invoice(Pipe<Buffer> *pipe, const Socket &destination, const Bytes32 &id, uint64_t serial, const Float &balance, const Bytes32 &commit);
+    task<void> Invoice(Pipe<Buffer> *pipe, const Socket &destination, const Bytes32 &id);
+
+    task<void> Submit(Pipe<Buffer> *pipe, const Bytes32 &id, const Buffer &data);
 
   protected:
-    virtual Pump *Inner() = 0;
+    virtual Pump<Buffer> *Inner() = 0;
 
     void Land(Pipe<Buffer> *pipe, const Buffer &data) override;
 

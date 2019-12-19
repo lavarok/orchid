@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:orchid/pages/app_text.dart';
 import 'package:orchid/pages/common/formatting.dart';
+import 'package:orchid/pages/common/instructions_view.dart';
 import 'package:orchid/pages/common/titled_page_base.dart';
-import 'circuit_hop.dart';
+import 'hop_editor.dart';
+import 'model/circuit_hop.dart';
 import 'openvpn_hop_page.dart';
 import 'orchid_hop_page.dart';
 
@@ -21,7 +23,7 @@ class _AddHopPageState extends State<AddHopPage> {
   @override
   Widget build(BuildContext context) {
     return TitledPage(
-      title: "Add Circuit Hop",
+      title: "Select Hop Type",
       cancellable: true,
       backAction: () {
         widget.onAddFlowComplete(null);
@@ -34,6 +36,14 @@ class _AddHopPageState extends State<AddHopPage> {
             _divider(),
             _buildHopChoice(text: "OpenVPN Hop", hopType: Protocol.OpenVPN),
             _divider(),
+            pady(32),
+            Expanded(
+                child: InstructionsView(
+              image: Image.asset("assets/images/approach.png"),
+              title: "Choose your protocol",
+              body:
+                  "There are two types of hops to choose from. You can route your traffic through a random, curated Orchid server or you can use your existing VPN provider’s OpenVPN configuration.",
+            )),
           ],
         ),
       ),
@@ -81,3 +91,4 @@ class _AddHopPageState extends State<AddHopPage> {
   Divider _divider() =>
       Divider(color: Colors.black.withOpacity(0.3), height: 1.0);
 }
+

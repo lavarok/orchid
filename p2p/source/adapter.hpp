@@ -37,17 +37,18 @@ class Converted final :
     public Buffer
 {
   private:
-    std::vector<Range> ranges_;
-    const Buffers_ &buffers_;
+    const std::vector<Range> ranges_;
 
   public:
     Converted(const Buffers_ &buffers) :
-        buffers_(buffers)
+        ranges_([&]() {
+            std::vector<Range> ranges;
+            ranges.reserve(buffers.size());
+            for (const auto &buffer : buffers)
+                ranges.emplace_back(reinterpret_cast<const uint8_t *>(buffer.data()), buffer.size());
+            return ranges;
+        })
     {
-        for (auto i(buffers_.begin()), e(buffers_.end()); i != e; ++i) {
-            const auto &buffer(*i);
-            ranges_.emplace_back(reinterpret_cast<const uint8_t *>(buffer.data()), buffer.size());
-        }
     }
 
     bool each(const std::function<bool (const uint8_t *, size_t)> &code) const override {
@@ -61,9 +62,6 @@ class Converted final :
 class Adapter :
     public BufferDrain
 {
-    template <typename Base_, typename Inner_, typename Drain_>
-    friend class Sink;
-
   public:
     typedef Adapter lowest_layer_type;
     typedef boost::asio::io_context::executor_type executor_type;
@@ -77,7 +75,7 @@ class Adapter :
     size_t offset_ = 0;
 
   protected:
-    virtual Pump *Inner() = 0;
+    virtual Pump<Buffer> *Inner() = 0;
 
     void Land(const Buffer &data) override {
         std::unique_lock<std::mutex> lock(mutex_);

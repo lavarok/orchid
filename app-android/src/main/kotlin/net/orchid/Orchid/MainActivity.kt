@@ -18,16 +18,13 @@ class MainActivity(): FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         GeneratedPluginRegistrant.registerWith(this)
-
-        installConfig();
-
+        
         feedback = MethodChannel(flutterView, "orchid.com/feedback")
         feedback.setMethodCallHandler { call, result ->
             Log.d("Orchid", call.method)
             when (call.method) {
                 "group_path" -> {
                     result.success(getFilesDir().getAbsolutePath())
-                    feedback.invokeMethod("providerStatus", true)
                 }
                 "connect" -> {
                     val intent = VpnService.prepare(this);
@@ -69,6 +66,11 @@ class MainActivity(): FlutterActivity() {
             }
         }
 
+        // TODO: Implement status check and "install" method of our feedback handler
+        // TODO: to allow the UI to participate in permission prompting if desired.
+        // Indicate to the UI that the VPN permissions are granted.
+        feedback.invokeMethod("providerStatus", true)
+
         // we *could* hook feedback "connectionStatus" up to ConnectivityService:
         // NetworkAgentInfo [VPN () - 112] EVENT_NETWORK_INFO_CHANGED, going from CONNECTING to CONNECTED
         // but we'd need to make sure it's the Orchid VPN.
@@ -87,18 +89,6 @@ class MainActivity(): FlutterActivity() {
 
     private fun configFile(): File {
         return File(filesDir.absolutePath + "/orchid.cfg");
-    }
-
-    // Install the default config file on first launch.
-    private fun installConfig() {
-        var file = configFile();
-        val defaultConfig = assets.open("flutter_assets/assets/default.cfg")
-        defaultConfig.use { defaultConfig ->
-            if (!file.exists()) {
-                Log.d("Orchid", "Installing default config file")
-                copyTo(defaultConfig, file);
-            }
-        }
     }
 
     fun copyTo(ins: InputStream, dst: File) {

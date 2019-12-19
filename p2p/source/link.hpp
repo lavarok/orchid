@@ -77,18 +77,19 @@ class Faucet :
 
 using BufferDrain = Drain<const Buffer &>;
 
+template <typename Type_, typename Value_ = const Type_ &>
 class Pump :
-    public Faucet<BufferDrain>,
-    public Pipe<Buffer>
+    public Faucet<Drain<Value_>>,
+    public Pipe<Type_>
 {
   protected:
-    void Land(const Buffer &data) {
-        return Outer()->Land(data);
+    void Land(const Type_ &data) {
+        return Faucet<Drain<Value_>>::Outer()->Land(data);
     }
 
   public:
-    Pump(BufferDrain *drain) :
-        Faucet<BufferDrain>(drain)
+    Pump(Drain<Value_> *drain) :
+        Faucet<Drain<Value_>>(drain)
     {
     }
 };
@@ -98,7 +99,7 @@ class Stopper :
     public BufferDrain
 {
   protected:
-    virtual Pump *Inner() = 0;
+    virtual Pump<Buffer> *Inner() = 0;
 
     void Land(const Buffer &buffer) override {
     }
@@ -113,27 +114,28 @@ class Stopper :
     }
 };
 
+template <typename Type_>
 class Link :
-    public Pump,
-    public BufferDrain
+    public Pump<Type_>,
+    public Drain<const Type_ &>
 {
   protected:
     void Land(const Buffer &data) override {
-        return Pump::Land(data);
+        return Pump<Type_>::Land(data);
     }
 
     void Stop(const std::string &error = std::string()) override {
-        return Pump::Stop(error);
+        return Pump<Type_>::Stop(error);
     }
 
   public:
-    Link(BufferDrain *drain) :
-        Pump(drain)
+    Link(Drain<const Buffer &> *drain) :
+        Pump<Type_>(drain)
     {
     }
 };
 
-template <typename Inner_ = Pump, typename Drain_ = BufferDrain>
+template <typename Drain_ = BufferDrain, typename Inner_ = Pump<Buffer>>
 class Sunk {
   protected:
     U<Inner_> inner_;
@@ -144,21 +146,29 @@ class Sunk {
     template <typename Type_, typename... Args_>
     Type_ *Wire(Args_ &&...args) {
         auto inner(std::make_unique<Type_>(Gave(), std::forward<Args_>(args)...));
-        auto backup(inner.get());
+        const auto backup(inner.get());
         inner_ = std::move(inner);
         return backup;
     }
 };
 
-template <typename Base_, typename Inner_ = Pump, typename Drain_ = BufferDrain>
+template <typename Base_>
+class Sunken :
+    private Base_
+{
+  public:
+    using Base_::Inner;
+};
+
+template <typename Base_, typename Drain_ = BufferDrain, typename Inner_ = typename std::remove_pointer<decltype(std::declval<Sunken<Base_>>().Inner())>::type>
 class Sink final :
     public Base_,
-    public Sunk<Inner_, Drain_>
+    public Sunk<Drain_, Inner_>
 {
   private:
     Inner_ *Inner() override {
-        auto inner(this->inner_.get());
-        orc_insist_(inner != nullptr, typeid(Inner_).name() << " " << typeid(Base_).name() << "::Inner() == nullptr");
+        const auto inner(this->inner_.get());
+        orc_insist_(inner != nullptr, typeid(decltype(inner)).name() << " " << typeid(Base_).name() << "::Inner() == nullptr");
         return inner;
     }
 
@@ -171,7 +181,7 @@ class Sink final :
 
     ~Sink() override {
         if (Verbose)
-            Log() << "~Sink<" << typeid(Base_).name() << ", " << typeid(Inner_).name() << ">()" << std::endl;
+            Log() << "~Sink<" << typeid(Base_).name() << ">()" << std::endl;
     }
 };
 

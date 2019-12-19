@@ -23,6 +23,7 @@
 #include "endpoint.hpp"
 #include "error.hpp"
 #include "http.hpp"
+#include "json.hpp"
 
 namespace orc {
 
@@ -30,7 +31,7 @@ static Explode Verify(Json::Value &proofs, Brick<32> hash, const Region &path) {
     size_t offset(0);
     orc_assert(!proofs.isNull());
     for (auto e(proofs.size()), i(decltype(e)(0)); i != e; ++i) {
-        auto data(Bless(proofs[i].asString()));
+        const auto data(Bless(proofs[i].asString()));
         orc_assert(Hash(data) == hash);
 
         Explode proof(data);
@@ -42,11 +43,11 @@ static Explode Verify(Json::Value &proofs, Brick<32> hash, const Region &path) {
             } break;
 
             case 2: {
-                auto leg(proof[0].buf());
-                auto type(leg.nib(0));
+                const auto leg(proof[0].buf());
+                const auto type(leg.nib(0));
                 for (size_t i((type & 0x1) != 0 ? 1 : 2), e(leg.size() * 2); i != e; ++i)
                     orc_assert(path.nib(offset++) == leg.nib(i));
-                Range range(proof[1].buf());
+                const Range range(proof[1].buf());
                 if ((type & 0x2) != 0)
                     return Window(range);
                 hash = range;
@@ -80,7 +81,7 @@ Account::Account(const Block &block, Json::Value &value) :
     orc_assert(leaf[3].num() == code_);
 }
 
-uint256_t Endpoint::Get(int index, Json::Value &storages, const Region &root, const uint256_t &key) {
+uint256_t Endpoint::Get(int index, Json::Value &storages, const Region &root, const uint256_t &key) const {
     auto storage(storages[index]);
     orc_assert(uint256_t(storage["key"].asString()) == key);
     uint256_t value(storage["value"].asString());
@@ -89,7 +90,7 @@ uint256_t Endpoint::Get(int index, Json::Value &storages, const Region &root, co
     return value;
 }
 
-task<Json::Value> Endpoint::operator ()(const std::string &method, Argument args) {
+task<Json::Value> Endpoint::operator ()(const std::string &method, Argument args) const {
     Json::Value root;
     root["jsonrpc"] = "2.0";
     root["method"] = method;
@@ -97,18 +98,14 @@ task<Json::Value> Endpoint::operator ()(const std::string &method, Argument args
     root["params"] = std::move(args);
 
     Json::FastWriter writer;
-    auto body(co_await origin_->Request("POST", locator_, {{"content-type", "application/json"}}, writer.write(root)));
+    const auto data(Parse((co_await origin_->Request("POST", locator_, {{"content-type", "application/json"}}, writer.write(root))).ok()));
+    Log() << root << " -> " << data << "" << std::endl;
 
-    Json::Value result;
-    Json::Reader reader;
-    orc_assert(reader.parse(body, result, false));
-    Log() << root << " -> " << result << "" << std::endl;
+    orc_assert(data["jsonrpc"] == "2.0");
 
-    orc_assert(result["jsonrpc"] == "2.0");
+    const auto error(data["error"]);
 
-    auto error(result["error"]);
-
-    auto id(result["id"]);
+    const auto id(data["id"]);
     orc_assert(!id.isNull() || !error.isNull());
 
     orc_assert_(error.isNull(), ([&]() {
@@ -119,8 +116,8 @@ task<Json::Value> Endpoint::operator ()(const std::string &method, Argument args
         return text;
     }()));
 
-    orc_assert(result["id"] == "");
-    co_return result["result"];
+    orc_assert(id == "");
+    co_return data["result"];
 }
 
 }

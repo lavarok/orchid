@@ -59,7 +59,7 @@ class LoggerDatabase :
     LoggerDatabase(const std::string &path) :
         Database(path)
     {
-        auto application(std::get<0>(Statement<One<int32_t>>(*this, R"(pragma application_id)")()));
+        const auto application(std::get<0>(Statement<One<int32_t>>(*this, R"(pragma application_id)")()));
         orc_assert(application == 0);
 
         Statement<Skip>(*this, R"(pragma journal_mode = wal)")();
@@ -68,7 +68,7 @@ class LoggerDatabase :
 
         Statement<None>(*this, R"(begin)")();
 
-        auto version(std::get<0>(Statement<One<int32_t>>(*this, R"(pragma user_version)")()));
+        const auto version(std::get<0>(Statement<One<int32_t>>(*this, R"(pragma user_version)")()));
         switch (version) {
             case 0:
                 Statement<None>(*this, R"(
@@ -165,7 +165,8 @@ class Logger :
                 // TODO: IPv6
                 if (result->answers[i].generic.type == RR_A) {
                     auto ip = asio::ip::address_v4(boost::endian::native_to_big(result->answers[i].a.address));
-                    Log() << "DNS " << hostname << " " << ip << std::endl;
+                    if (Verbose)
+                        Log() << "DNS " << hostname << " " << ip << std::endl;
                     dns_log_[ip] = hostname;
                     break;
                 }
@@ -277,9 +278,9 @@ class Punch :
     Hole *const hole_;
     Socket socket_;
 
+  protected:
     virtual Opening *Inner() = 0;
 
-  protected:
     void Land(const Buffer &data, Socket socket) override {
         hole_->Land(Datagram(socket, socket_, data));
     }
@@ -550,8 +551,9 @@ task<bool> Split::Send(const Beam &data) {
                 Forge(span, tcp, ephemeral->second.socket_, local_);
                 capture_->Land(subset, false);
             } else if (ephemeral == ephemerals_.end()) {
-                auto port(ephemerals_.size());
-                if (port >= 65535) {
+                // port 0 is not valid
+                auto port(ephemerals_.size() + 1);
+                if (port >= 65535 - 1) {
                     auto old_four(*lru_.begin());
                     auto old_ephemeral(ephemerals_.find(old_four));
                     port = old_ephemeral->second.socket_.Port();
@@ -600,7 +602,7 @@ task<bool> Split::Send(const Beam &data) {
             Socket source(boost::endian::big_to_native(ip4.saddr), boost::endian::big_to_native(udp.source));
             auto &punch(udp_[source]);
             if (punch == nullptr) {
-                auto sink(std::make_unique<Sink<Punch, Opening, BufferSewer>>(this, source));
+                auto sink(std::make_unique<Sink<Punch, BufferSewer>>(this, source));
                 co_await origin_->Unlid(sink.get());
                 punch = std::move(sink);
             }
@@ -643,7 +645,7 @@ class Pass :
     Capture *const capture_;
 
   protected:
-    virtual Pump *Inner() = 0;
+    virtual Pump<Buffer> *Inner() = 0;
 
     void Land(const Buffer &data) override {
         return capture_->Land(data, true);
@@ -666,7 +668,7 @@ class Pass :
 
 task<Sunk<> *> Capture::Start() {
     auto pass(std::make_unique<Sink<Pass>>(this));
-    auto backup(pass.get());
+    const auto backup(pass.get());
     internal_ = std::move(pass);
     co_return backup;
 }
@@ -679,21 +681,28 @@ static duk_ret_t print(duk_context *ctx) {
     return 0;
 }
 
-static task<void> Single(Sunk<> *sunk, Heap &heap, Network &network, const S<Origin> &origin, const Beam &argument, const Host &local, unsigned hop) {
-    std::string hops("hops[" + std::to_string(hop) + "]");
-    auto protocol(heap.eval<std::string>(hops + ".protocol"));
+static task<void> Single(Sunk<> *sunk, Heap &heap, Network &network, const S<Origin> &origin, const Host &local, unsigned hop) {
+    const std::string hops("hops[" + std::to_string(hop) + "]");
+    const auto protocol(heap.eval<std::string>(hops + ".protocol"));
     if (false) {
     } else if (protocol == "orchid") {
-        Secret secret(Bless(heap.eval<std::string>(hops + ".secret")));
-        Address funder(heap.eval<std::string>(hops + ".funder"));
-        co_await network.Random(sunk, origin, argument, secret, funder);
+        const Address lottery(heap.eval<std::string>(hops + ".lottery", "0xb02396f06CC894834b7934ecF8c8E5Ab5C1d12F1"));
+        const uint256_t chain(heap.eval<double>(hops + ".chainid", 1));
+        const Secret secret(Bless(heap.eval<std::string>(hops + ".secret")));
+        const Address funder(heap.eval<std::string>(hops + ".funder"));
+        const std::string curator(heap.eval<std::string>(hops + ".curator"));
+        const Address provider(heap.eval<std::string>(hops + ".provider", "0x0000000000000000000000000000000000000000"));
+        co_await network.Random(sunk, origin, curator, provider, lottery, chain, secret, funder);
     } else if (protocol == "openvpn") {
-        auto ovpnfile(heap.eval<std::string>(hops + ".ovpnfile"));
-        auto username(heap.eval<std::string>(hops + ".username"));
-        auto password(heap.eval<std::string>(hops + ".password"));
-        co_await Connect(sunk, origin, local, ovpnfile, username, password);
+        co_await Connect(sunk, origin, local,
+            heap.eval<std::string>(hops + ".ovpnfile"),
+            heap.eval<std::string>(hops + ".username"),
+            heap.eval<std::string>(hops + ".password")
+        );
     }
 }
+
+extern unsigned WinShift_;
 
 task<void> Capture::Start(const std::string &path) {
     std::string config;
@@ -705,10 +714,9 @@ task<void> Capture::Start(const std::string &path) {
     duk_put_global_string(heap, "print");
 
     heap.eval<void>(R"(
-        eth_directory = "0xd87e0ee1a59841de2ac78c17209db97e27651985";
-        eth_location = "0xE214330bDd412F07d8FC4d4960698c0D657e1774";
-        eth_curator = "0x55Abb3CE20ABbC38444e0A200dDE7fC0388b76a5";
-        eth_argument = "2b1ce95573ec1b927a90cb488db113b40eeb064a";
+        eth_directory = "0x918101FB64f467414e9a785aF9566ae69C3e22C5";
+        eth_location = "0xEF7bc12e0F6B02fE2cb86Aa659FdC3EBB727E0eD";
+        eth_winshift = 10;
         rpc = "https://cloudflare-eth.com:443/";
         hops = [];
         //stun = "stun:stun.l.google.com:19302";
@@ -718,24 +726,25 @@ task<void> Capture::Start(const std::string &path) {
 
     S<Origin> origin(Break<Local>());
 
-    auto hops(unsigned(heap.eval<double>("hops.length")));
+    const auto hops(unsigned(heap.eval<double>("hops.length")));
     if (hops == 0)
         co_return co_await Start(std::move(origin));
 
-    Network network(heap.eval<std::string>("rpc"), Address(heap.eval<std::string>("eth_directory")), Address(heap.eval<std::string>("eth_location")), Address(heap.eval<std::string>("eth_curator")));
-    Beam argument(Bless(heap.eval<std::string>("eth_argument")));
+    WinShift_ = unsigned(heap.eval<double>("eth_winshift"));
 
-    auto host(origin->Host());
+    Network network(heap.eval<std::string>("rpc"), Address(heap.eval<std::string>("eth_directory")), Address(heap.eval<std::string>("eth_location")));
+
+    const auto host(origin->Host());
 
     for (unsigned i(0); i != hops - 1; ++i) {
         auto remote(Break<Sink<Remote>>());
-        co_await Single(remote.get(), heap, network, origin, argument, remote->Host(), i);
+        co_await Single(remote.get(), heap, network, origin, remote->Host(), i);
         remote->Open();
-        origin = remote;
+        origin = std::move(remote);
     }
 
-    auto sunk(co_await Start());
-    co_await Single(sunk, heap, network, origin, argument, host, hops - 1);
+    const auto sunk(co_await Start());
+    co_await Single(sunk, heap, network, origin, host, hops - 1);
 }
 
 }

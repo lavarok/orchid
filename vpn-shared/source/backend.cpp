@@ -37,10 +37,10 @@ void Backend() {
     auto router(Make<http::basic_router<HttpSession>>(std::regex::ECMAScript));
 
     router->all(R"(^.*$)", [&](auto request, auto context) {
-        context.send(Response(request, "text/plain", ""));
+        Respond(context, request, "text/plain", "");
     });
 
-    auto fail([](auto code, auto from) {
+    const auto fail([](auto code, auto from) {
         Log() << "ERROR " << code << " " << from << std::endl;
     });
 

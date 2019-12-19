@@ -1,10 +1,8 @@
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:orchid/api/orchid_crypto.dart';
-import 'package:orchid/pages/circuit/circuit_hop.dart';
+import 'package:orchid/pages/circuit/model/circuit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
 import 'orchid_api.dart';
 import 'orchid_budget_api.dart';
 
@@ -194,13 +192,49 @@ class UserPreferences {
 
   Future<bool> getQueryBalances() async {
     return (await SharedPreferences.getInstance())
-        .getBool(UserPreferenceKey.QueryBalances.toString()) ??
-        false;
+            .getBool(UserPreferenceKey.QueryBalances.toString()) ??
+        true;
   }
 
   Future<bool> setQueryBalances(bool value) async {
     return (await SharedPreferences.getInstance())
         .setBool(UserPreferenceKey.QueryBalances.toString(), value);
+  }
+
+  // Get the user's desired vpn state where true is on, false is off.
+  // Defaults to false if never set.
+  Future<bool> getDesiredVPNState() async {
+    return (await SharedPreferences.getInstance())
+        .getBool(UserPreferenceKey.DesiredVPNState.toString()) ??
+        false;
+  }
+
+  // Set the user's desired vpn state where true is on, false is off.
+  Future<bool> setDesiredVPNState(bool value) async {
+    return (await SharedPreferences.getInstance())
+        .setBool(UserPreferenceKey.DesiredVPNState.toString(), value);
+  }
+
+  Future<bool> getShowStatusTab() async {
+    return (await SharedPreferences.getInstance())
+        .getBool(UserPreferenceKey.ShowStatusTab.toString()) ??
+        false;
+  }
+
+  Future<bool> setShowStatusTab(bool value) async {
+    return (await SharedPreferences.getInstance())
+        .setBool(UserPreferenceKey.ShowStatusTab.toString(), value);
+  }
+
+  Future<bool> getVPNSwitchInstructionsViewed() async {
+    return (await SharedPreferences.getInstance())
+        .getBool(UserPreferenceKey.VPNSwitchInstructionsViewed.toString()) ??
+        false;
+  }
+
+  Future<bool> setVPNSwitchInstructionsViewed(bool value) async {
+    return (await SharedPreferences.getInstance())
+        .setBool(UserPreferenceKey.VPNSwitchInstructionsViewed.toString(), value);
   }
 }
 
@@ -216,5 +250,8 @@ enum UserPreferenceKey {
   UserConfig,
   Keys,
   DefaultCurator,
-  QueryBalances
+  QueryBalances,
+  DesiredVPNState,
+  ShowStatusTab,
+  VPNSwitchInstructionsViewed,
 }

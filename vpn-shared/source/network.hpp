@@ -34,17 +34,16 @@ namespace orc {
 
 class Network {
   private:
-    Locator locator_;
-    Address directory_;
-    Address location_;
-    Address curator_;
+    const Locator locator_;
+    const Address directory_;
+    const Address location_;
 
     boost::random::independent_bits_engine<boost::mt19937, 128, uint128_t> generator_;
 
   public:
-    Network(const std::string &rpc, Address directory, Address location, Address curator);
+    Network(const std::string &rpc, Address directory, Address location);
 
-    task<void> Random(Sunk<> *sunk, const S<Origin> &origin, const Beam &argument, const Secret &secret, Address funder);
+    task<void> Random(Sunk<> *sunk, const S<Origin> &origin, const std::string &name, const Address &provider, Address lottery, uint256_t chain, const Secret &secret, Address funder);
 };
 
 }
